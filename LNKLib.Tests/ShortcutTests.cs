@@ -344,4 +344,143 @@ public class ShortcutTests
         // When arguments is null, padArguments should have no effect
         Assert.Equal(withoutPad.Length, withPad.Length);
     }
+
+    // --- WindowStyle tests ---
+
+    [Fact]
+    public void Create_WindowStyleNormal_WritesCorrectValue()
+    {
+        byte[] result = Shortcut.Create(@"C:\Windows\notepad.exe", windowStyle: ShortcutWindowStyle.Normal);
+
+        uint showCommand = BitConverter.ToUInt32(result, 60);
+        Assert.Equal(1u, showCommand);
+    }
+
+    [Fact]
+    public void Create_WindowStyleMaximized_WritesCorrectValue()
+    {
+        byte[] result = Shortcut.Create(@"C:\Windows\notepad.exe", windowStyle: ShortcutWindowStyle.Maximized);
+
+        uint showCommand = BitConverter.ToUInt32(result, 60);
+        Assert.Equal(3u, showCommand); // SW_SHOWMAXIMIZED
+    }
+
+    [Fact]
+    public void Create_WindowStyleMinimized_WritesCorrectValue()
+    {
+        byte[] result = Shortcut.Create(@"C:\Windows\notepad.exe", windowStyle: ShortcutWindowStyle.Minimized);
+
+        uint showCommand = BitConverter.ToUInt32(result, 60);
+        Assert.Equal(7u, showCommand); // SW_SHOWMINNOACTIVE
+    }
+
+    // --- RunAsAdmin tests ---
+
+    [Fact]
+    public void Create_RunAsAdmin_SetsRunAsUserFlag()
+    {
+        byte[] result = Shortcut.Create(@"C:\Windows\notepad.exe", runAsAdmin: true);
+
+        uint linkFlags = BitConverter.ToUInt32(result, 20);
+        Assert.True((linkFlags & 0x00002000) != 0, "FLAG_RUN_AS_USER should be set");
+    }
+
+    [Fact]
+    public void Create_WithoutRunAsAdmin_ClearsRunAsUserFlag()
+    {
+        byte[] result = Shortcut.Create(@"C:\Windows\notepad.exe");
+
+        uint linkFlags = BitConverter.ToUInt32(result, 20);
+        Assert.True((linkFlags & 0x00002000) == 0, "FLAG_RUN_AS_USER should not be set");
+    }
+
+    [Fact]
+    public void Create_RunAsAdmin_WithOtherFlags_PreservesAllFlags()
+    {
+        byte[] result = Shortcut.Create(
+            target: @"C:\Windows\notepad.exe",
+            description: "Test",
+            arguments: "/test",
+            runAsAdmin: true);
+
+        uint linkFlags = BitConverter.ToUInt32(result, 20);
+        Assert.True((linkFlags & 0x00002000) != 0, "FLAG_RUN_AS_USER");
+        Assert.True((linkFlags & 0x00000004) != 0, "FLAG_HAS_NAME");
+        Assert.True((linkFlags & 0x00000020) != 0, "FLAG_HAS_ARGUMENTS");
+    }
+
+    // --- Hotkey tests ---
+
+    [Fact]
+    public void Create_Hotkey_WritesKeyAndModifiers()
+    {
+        // Ctrl+Alt+T: key = 0x54 ('T'), modifiers = Control | Alt = 0x06
+        byte[] result = Shortcut.Create(
+            @"C:\Windows\notepad.exe",
+            hotkeyKey: 0x54,
+            hotkeyModifiers: HotkeyModifiers.Control | HotkeyModifiers.Alt);
+
+        // Hotkey at offset 64 (2 bytes: low = key, high = modifiers)
+        Assert.Equal(0x54, result[64]); // Virtual key code for 'T'
+        Assert.Equal(0x06, result[65]); // Control (0x02) | Alt (0x04)
+    }
+
+    [Fact]
+    public void Create_DefaultHotkey_IsZero()
+    {
+        byte[] result = Shortcut.Create(@"C:\Windows\notepad.exe");
+
+        Assert.Equal(0, result[64]);
+        Assert.Equal(0, result[65]);
+    }
+
+    [Fact]
+    public void Create_Hotkey_ShiftOnly()
+    {
+        byte[] result = Shortcut.Create(
+            @"C:\Windows\notepad.exe",
+            hotkeyKey: 0x41, // 'A'
+            hotkeyModifiers: HotkeyModifiers.Shift);
+
+        Assert.Equal(0x41, result[64]);
+        Assert.Equal(0x01, result[65]); // Shift
+    }
+
+    // --- Combined features test ---
+
+    [Fact]
+    public void Create_AllNewFeatures_CreatesValidOutput()
+    {
+        byte[] result = Shortcut.Create(
+            target: @"C:\Windows\notepad.exe",
+            arguments: "test.txt",
+            description: "Notepad",
+            workingDirectory: @"C:\Windows",
+            iconLocation: @"C:\Windows\notepad.exe",
+            iconIndex: 1,
+            windowStyle: ShortcutWindowStyle.Maximized,
+            runAsAdmin: true,
+            hotkeyKey: 0x54,
+            hotkeyModifiers: HotkeyModifiers.Control | HotkeyModifiers.Alt);
+
+        // Valid header
+        uint headerSize = BitConverter.ToUInt32(result, 0);
+        Assert.Equal(HEADER_SIZE, headerSize);
+
+        // ShowCommand = Maximized
+        uint showCommand = BitConverter.ToUInt32(result, 60);
+        Assert.Equal(3u, showCommand);
+
+        // Hotkey
+        Assert.Equal(0x54, result[64]);
+        Assert.Equal(0x06, result[65]);
+
+        // RunAsAdmin flag
+        uint linkFlags = BitConverter.ToUInt32(result, 20);
+        Assert.True((linkFlags & 0x00002000) != 0, "FLAG_RUN_AS_USER should be set");
+
+        // Ends with terminator
+        uint terminator = BitConverter.ToUInt32(result, result.Length - 4);
+        Assert.Equal(0u, terminator);
+    }
 }

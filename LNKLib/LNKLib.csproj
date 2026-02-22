@@ -5,11 +5,20 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>LNKLib</PackageId>
+    <Version>1.0.0</Version>
     <Description>A zero-dependency library for creating Windows Shell Link (.lnk) shortcut files in memory.</Description>
     <Authors>mrzaxaryan</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/mrzaxaryan/LNK</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/mrzaxaryan/LNK</PackageProjectUrl>
+    <PackageTags>lnk;shortcut;shell-link;windows</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="LNKLib.Tests" />

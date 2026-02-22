@@ -150,7 +150,11 @@ public static class Shortcut
         int iconIndex = 0,
         string? description = null,
         string? workingDirectory = null,
-        bool isPrinterLink = false)
+        bool isPrinterLink = false,
+        ShortcutWindowStyle windowStyle = ShortcutWindowStyle.Normal,
+        bool runAsAdmin = false,
+        byte hotkeyKey = 0,
+        HotkeyModifiers hotkeyModifiers = HotkeyModifiers.None)
     {
         // --- Header and LinkCLSID ---
         byte[] headerSize = { 0x4C, 0x00, 0x00, 0x00 };
@@ -164,6 +168,7 @@ public static class Shortcut
         const int FLAG_HAS_ARGUMENTS = 0x00000020;
         const int FLAG_HAS_ICON_LOCATION = 0x00000040;
         const int FLAG_HAS_EXP_SZ = 0x00000200;
+        const int FLAG_RUN_AS_USER = 0x00002000;
         const int FLAG_PREFER_ENVIRONMENT_PATH = 0x02000000;
 
         // --- File attribute bytes ---
@@ -175,8 +180,8 @@ public static class Shortcut
         byte[] accessTime = new byte[8];
         byte[] writeTime = new byte[8];
         byte[] fileSize = new byte[4];
-        byte[] showCommand = { 0x01, 0x00, 0x00, 0x00 };
-        byte[] hotkey = new byte[2];
+        byte[] showCommand = BitConverter.GetBytes((uint)windowStyle);
+        byte[] hotkey = { hotkeyKey, (byte)hotkeyModifiers };
         byte[] reserved = new byte[2];
         byte[] reserved2 = new byte[4];
         byte[] reserved3 = new byte[4];
@@ -283,6 +288,7 @@ public static class Shortcut
             | (workingDirectory != null ? FLAG_HAS_WORKING_DIR : 0)
             | (arguments != null ? FLAG_HAS_ARGUMENTS : 0)
             | (iconLocation != null ? FLAG_HAS_ICON_LOCATION : 0)
+            | (runAsAdmin ? FLAG_RUN_AS_USER : 0)
             | flagEnv;
 
         // --- Write out the binary file ---
