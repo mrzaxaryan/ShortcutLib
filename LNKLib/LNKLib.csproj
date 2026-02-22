@@ -1,10 +1,18 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PackageId>LNKLib</PackageId>
+    <Description>A zero-dependency library for creating Windows Shell Link (.lnk) shortcut files in memory.</Description>
+    <Authors>mrzaxaryan</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/mrzaxaryan/LNK</RepositoryUrl>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="LNKLib.Tests" />
+  </ItemGroup>
 
 </Project>

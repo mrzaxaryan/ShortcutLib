@@ -1,3 +1,7 @@
 <Solution>
   <Project Path="LNKLib/LNKLib.csproj" />
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="LNKLib.Tests/LNKLib.Tests.csproj" />
 </Solution>
