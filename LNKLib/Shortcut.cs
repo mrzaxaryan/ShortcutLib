@@ -6,6 +6,11 @@ public static class Shortcut
 {
     private const int MaxPath = 260;
     private const uint EnvVarBlockSignature = 0xA0000001;
+    private const uint IconEnvBlockSignature = 0xA0000007;
+    private const uint TrackerBlockSignature = 0xA0000003;
+    private const uint SpecialFolderBlockSignature = 0xA0000005;
+    private const uint PropertyStoreBlockSignature = 0xA0000009;
+    private const uint KnownFolderBlockSignature = 0xA000000B;
 
     /// <summary>
     /// Converts a hexadecimal character to its corresponding byte value.
@@ -46,17 +51,32 @@ public static class Shortcut
     }
 
     /// <summary>
-    /// Writes an optional string to the BinaryWriter (2-byte length then string bytes).
-    /// Per the .lnk spec, StringData uses ANSI encoding when IS_UNICODE is not set.
+    /// Converts a nullable DateTime to an 8-byte FILETIME representation.
+    /// Returns 8 zero bytes when null.
     /// </summary>
-    private static void WriteStringData(BinaryWriter writer, string? value)
+    private static byte[] ToFileTimeBytes(DateTime? dt)
+    {
+        if (dt is null) return new byte[8];
+        long ft = dt.Value.ToFileTimeUtc();
+        return BitConverter.GetBytes(ft);
+    }
+
+    /// <summary>
+    /// Writes an optional string to the BinaryWriter (2-byte length then string bytes).
+    /// When unicode is false, uses ANSI encoding per the .lnk spec (IS_UNICODE not set).
+    /// When unicode is true, uses UTF-16LE encoding.
+    /// </summary>
+    private static void WriteStringData(BinaryWriter writer, string? value, bool unicode)
     {
         if (value is null)
             return;
         int length = value.Length;
         writer.Write((byte)(length % 256));
         writer.Write((byte)(length / 256));
-        writer.Write(Encoding.Default.GetBytes(value));
+        if (unicode)
+            writer.Write(Encoding.Unicode.GetBytes(value));
+        else
+            writer.Write(Encoding.Default.GetBytes(value));
     }
 
     /// <summary>
@@ -64,7 +84,7 @@ public static class Shortcut
     /// 31 KB buffer filled with whitespace characters, making them less visible in the
     /// shortcut properties UI.
     /// </summary>
-    private static void WritePaddedArguments(BinaryWriter writer, string arguments)
+    private static void WritePaddedArguments(BinaryWriter writer, string arguments, bool unicode)
     {
         int totalLength = 31 * 1024;
         char[] buffer = new char[totalLength];
@@ -90,22 +110,21 @@ public static class Shortcut
         arguments.CopyTo(0, buffer, fillLength, arguments.Length);
         writer.Write((byte)(totalLength % 256));
         writer.Write((byte)(totalLength / 256));
-        writer.Write(Encoding.Default.GetBytes(new string(buffer)));
+        if (unicode)
+            writer.Write(Encoding.Unicode.GetBytes(new string(buffer)));
+        else
+            writer.Write(Encoding.Default.GetBytes(new string(buffer)));
     }
 
     /// <summary>
-    /// Writes the Environment Variable Data Block.
-    /// The block layout is:
-    ///   DWORD   cbSize       - block size (788 bytes)
-    ///   DWORD   dwSignature  - signature (0xA0000001)
-    ///   CHAR    szTarget[MAX_PATH]   - ANSI string (260 bytes)
-    ///   WCHAR   swzTarget[MAX_PATH]  - Unicode string (520 bytes)
+    /// Writes an environment-variable-style data block (used for both EnvironmentVariableDataBlock
+    /// and IconEnvironmentDataBlock — they share the same layout, differing only in signature).
     /// </summary>
-    private static void WriteEnvVarDataBlock(BinaryWriter writer, string target)
+    private static void WriteEnvironmentDataBlock(BinaryWriter writer, string target, uint signature)
     {
         int blockSize = 4 + 4 + MaxPath + (MaxPath * 2); // 788 bytes
         writer.Write(blockSize);
-        writer.Write(EnvVarBlockSignature);
+        writer.Write(signature);
 
         // Prepare ANSI buffer (260 bytes): zero-filled, copy target, ensure null termination.
         byte[] ansiBuffer = new byte[MaxPath];
@@ -138,9 +157,183 @@ public static class Shortcut
     }
 
     /// <summary>
+    /// Writes the LinkInfo structure per [MS-SHLLINK] 2.3.
+    /// </summary>
+    private static void WriteLinkInfo(BinaryWriter writer, LinkInfo info)
+    {
+        // Build LinkInfo into a temporary buffer to compute offsets.
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+
+        bool hasLocal = info.Local is not null;
+        bool hasNetwork = info.Network is not null;
+
+        int flags = 0;
+        if (hasLocal) flags |= 0x01; // VolumeIDAndLocalBasePath
+        if (hasNetwork) flags |= 0x02; // CommonNetworkRelativeLinkAndPathSuffix
+
+        // LinkInfoHeaderSize = 0x1C (28 bytes) for the basic header
+        const int headerSize = 0x1C;
+
+        // Pre-compute VolumeID structure if local
+        byte[]? volumeIdBytes = null;
+        byte[]? localBasePathBytes = null;
+        if (hasLocal)
+        {
+            var local = info.Local!;
+            byte[] volumeLabelAnsi = Encoding.Default.GetBytes(local.VolumeLabel + "\0");
+            int volumeIdSize = 4 + 4 + 4 + 4 + volumeLabelAnsi.Length; // size + driveType + serialNum + labelOffset + label
+            using var volMs = new MemoryStream();
+            using var volW = new BinaryWriter(volMs);
+            volW.Write(volumeIdSize);
+            volW.Write(local.DriveType);
+            volW.Write(local.DriveSerialNumber);
+            volW.Write(0x10); // VolumeLabelOffset = 16 (offset within VolumeID structure)
+            volW.Write(volumeLabelAnsi);
+            volW.Flush();
+            volumeIdBytes = volMs.ToArray();
+
+            localBasePathBytes = Encoding.Default.GetBytes(local.BasePath + "\0");
+        }
+
+        // Pre-compute CommonNetworkRelativeLink if network
+        byte[]? cnrlBytes = null;
+        byte[]? commonPathSuffixBytes = null;
+        if (hasNetwork)
+        {
+            var network = info.Network!;
+            byte[] shareNameAnsi = Encoding.Default.GetBytes(network.ShareName + "\0");
+            // CommonNetworkRelativeLink: size(4) + flags(4) + netNameOffset(4) + deviceNameOffset(4) + networkProviderType(4) + netName
+            int cnrlSize = 4 + 4 + 4 + 4 + 4 + shareNameAnsi.Length;
+            using var cnrlMs = new MemoryStream();
+            using var cnrlW = new BinaryWriter(cnrlMs);
+            cnrlW.Write(cnrlSize);
+            cnrlW.Write(0); // CommonNetworkRelativeLinkFlags = 0
+            cnrlW.Write(0x14); // NetNameOffset = 20 (offset within CNRL)
+            cnrlW.Write(0); // DeviceNameOffset = 0
+            cnrlW.Write(0x00020000); // NetworkProviderType = WNNC_NET_LANMAN
+            cnrlW.Write(shareNameAnsi);
+            cnrlW.Flush();
+            cnrlBytes = cnrlMs.ToArray();
+
+            commonPathSuffixBytes = Encoding.Default.GetBytes(network.CommonPathSuffix + "\0");
+        }
+
+        // Compute offsets from start of LinkInfo
+        int volumeIdOffset = 0;
+        int localBasePathOffset = 0;
+        int cnrlOffset = 0;
+        int commonPathSuffixOffset = 0;
+
+        int currentOffset = headerSize;
+
+        if (hasLocal)
+        {
+            volumeIdOffset = currentOffset;
+            currentOffset += volumeIdBytes!.Length;
+            localBasePathOffset = currentOffset;
+            currentOffset += localBasePathBytes!.Length;
+        }
+
+        if (hasNetwork)
+        {
+            cnrlOffset = currentOffset;
+            currentOffset += cnrlBytes!.Length;
+            commonPathSuffixOffset = currentOffset;
+            currentOffset += commonPathSuffixBytes!.Length;
+        }
+        else
+        {
+            // CommonPathSuffix is always present, even for local-only
+            commonPathSuffixOffset = currentOffset;
+            commonPathSuffixBytes = new byte[] { 0 }; // empty null-terminated string
+            currentOffset += 1;
+        }
+
+        int linkInfoSize = currentOffset;
+
+        // Write the complete LinkInfo structure
+        writer.Write(linkInfoSize);
+        writer.Write(headerSize);
+        writer.Write(flags);
+        writer.Write(volumeIdOffset);
+        writer.Write(localBasePathOffset);
+        writer.Write(cnrlOffset);
+        writer.Write(commonPathSuffixOffset);
+
+        if (hasLocal)
+        {
+            writer.Write(volumeIdBytes!);
+            writer.Write(localBasePathBytes!);
+        }
+
+        if (hasNetwork)
+        {
+            writer.Write(cnrlBytes!);
+        }
+
+        writer.Write(commonPathSuffixBytes!);
+    }
+
+    /// <summary>
+    /// Writes a KnownFolderDataBlock (signature 0xA000000B, size 28 bytes).
+    /// </summary>
+    private static void WriteKnownFolderDataBlock(BinaryWriter writer, KnownFolderData data)
+    {
+        writer.Write(28); // BlockSize
+        writer.Write(KnownFolderBlockSignature);
+        writer.Write(data.FolderId.ToByteArray()); // 16 bytes
+        writer.Write(data.Offset);
+    }
+
+    /// <summary>
+    /// Writes a TrackerDataBlock (signature 0xA0000003, size 96 bytes).
+    /// </summary>
+    private static void WriteTrackerDataBlock(BinaryWriter writer, TrackerData data)
+    {
+        writer.Write(96); // BlockSize
+        writer.Write(TrackerBlockSignature);
+        writer.Write(88); // Length
+        writer.Write(0);  // Version
+
+        // MachineID: 16 bytes, null-padded
+        byte[] machineBytes = new byte[16];
+        byte[] nameBytes = Encoding.ASCII.GetBytes(data.MachineId);
+        int copyLen = Math.Min(nameBytes.Length, 15);
+        Array.Copy(nameBytes, machineBytes, copyLen);
+        writer.Write(machineBytes);
+
+        // Droid[0], Droid[1], DroidBirth[0], DroidBirth[1]
+        writer.Write(data.VolumeId.ToByteArray());
+        writer.Write(data.ObjectId.ToByteArray());
+        writer.Write((data.BirthVolumeId ?? data.VolumeId).ToByteArray());
+        writer.Write((data.BirthObjectId ?? data.ObjectId).ToByteArray());
+    }
+
+    /// <summary>
+    /// Writes a PropertyStoreDataBlock (signature 0xA0000009, variable size).
+    /// </summary>
+    private static void WritePropertyStoreDataBlock(BinaryWriter writer, byte[] data)
+    {
+        int blockSize = 8 + data.Length;
+        writer.Write(blockSize);
+        writer.Write(PropertyStoreBlockSignature);
+        writer.Write(data);
+    }
+
+    /// <summary>
+    /// Writes a SpecialFolderDataBlock (signature 0xA0000005, size 16 bytes).
+    /// </summary>
+    private static void WriteSpecialFolderDataBlock(BinaryWriter writer, SpecialFolderData data)
+    {
+        writer.Write(16); // BlockSize
+        writer.Write(SpecialFolderBlockSignature);
+        writer.Write(data.FolderId);
+        writer.Write(data.Offset);
+    }
+
+    /// <summary>
     /// Creates a Windows Shortcut (.lnk) file in memory and returns its binary content as a byte array.
-    /// If the target contains environment variables (e.g. "%windir%"), the extra data block is appended
-    /// after all mandatory and optional fields and then terminated with a 4-byte zero.
     /// </summary>
     public static byte[] Create(
         string target,
@@ -154,8 +347,43 @@ public static class Shortcut
         ShortcutWindowStyle windowStyle = ShortcutWindowStyle.Normal,
         bool runAsAdmin = false,
         byte hotkeyKey = 0,
-        HotkeyModifiers hotkeyModifiers = HotkeyModifiers.None)
+        HotkeyModifiers hotkeyModifiers = HotkeyModifiers.None) =>
+        Create(new ShortcutOptions
+        {
+            Target = target,
+            Arguments = arguments,
+            PadArguments = padArguments,
+            IconLocation = iconLocation,
+            IconIndex = iconIndex,
+            Description = description,
+            WorkingDirectory = workingDirectory,
+            IsPrinterLink = isPrinterLink,
+            WindowStyle = windowStyle,
+            RunAsAdmin = runAsAdmin,
+            HotkeyKey = hotkeyKey,
+            HotkeyModifiers = hotkeyModifiers
+        });
+
+    /// <summary>
+    /// Creates a Windows Shortcut (.lnk) file in memory using the specified options
+    /// and returns its binary content as a byte array.
+    /// </summary>
+    public static byte[] Create(ShortcutOptions options)
     {
+        string target = options.Target;
+        string? arguments = options.Arguments;
+        bool padArguments = options.PadArguments;
+        string? iconLocation = options.IconLocation;
+        int iconIndex = options.IconIndex;
+        string? description = options.Description;
+        string? workingDirectory = options.WorkingDirectory;
+        bool isPrinterLink = options.IsPrinterLink;
+        ShortcutWindowStyle windowStyle = options.WindowStyle;
+        bool runAsAdmin = options.RunAsAdmin;
+        byte hotkeyKey = options.HotkeyKey;
+        HotkeyModifiers hotkeyModifiers = options.HotkeyModifiers;
+        bool unicode = options.UseUnicode;
+
         // --- Header and LinkCLSID ---
         byte[] headerSize = { 0x4C, 0x00, 0x00, 0x00 };
         byte[] linkClsid = new byte[16];
@@ -163,10 +391,13 @@ public static class Shortcut
 
         // --- Flag constants ---
         const int FLAG_HAS_LINK_TARGET_ID_LIST = 0x00000001;
+        const int FLAG_HAS_LINK_INFO = 0x00000002;
         const int FLAG_HAS_NAME = 0x00000004;
+        const int FLAG_HAS_RELATIVE_PATH = 0x00000008;
         const int FLAG_HAS_WORKING_DIR = 0x00000010;
         const int FLAG_HAS_ARGUMENTS = 0x00000020;
         const int FLAG_HAS_ICON_LOCATION = 0x00000040;
+        const int FLAG_IS_UNICODE = 0x00000080;
         const int FLAG_HAS_EXP_SZ = 0x00000200;
         const int FLAG_RUN_AS_USER = 0x00002000;
         const int FLAG_PREFER_ENVIRONMENT_PATH = 0x02000000;
@@ -175,11 +406,11 @@ public static class Shortcut
         byte[] fileAttrDirectory = { 0x10, 0x00, 0x00, 0x00 };
         byte[] fileAttrFile = { 0x20, 0x00, 0x00, 0x00 };
 
-        // --- Fixed fields (zeroed) ---
-        byte[] creationTime = new byte[8];
-        byte[] accessTime = new byte[8];
-        byte[] writeTime = new byte[8];
-        byte[] fileSize = new byte[4];
+        // --- Fixed fields ---
+        byte[] creationTime = ToFileTimeBytes(options.CreationTime);
+        byte[] accessTime = ToFileTimeBytes(options.AccessTime);
+        byte[] writeTime = ToFileTimeBytes(options.WriteTime);
+        byte[] fileSize = BitConverter.GetBytes(options.FileSize);
         byte[] showCommand = BitConverter.GetBytes((uint)windowStyle);
         byte[] hotkey = { hotkeyKey, (byte)hotkeyModifiers };
         byte[] reserved = new byte[2];
@@ -284,10 +515,13 @@ public static class Shortcut
 
         // --- Combine all flags ---
         int linkFlags = FLAG_HAS_LINK_TARGET_ID_LIST
+            | (options.LinkInfo != null ? FLAG_HAS_LINK_INFO : 0)
             | (description != null ? FLAG_HAS_NAME : 0)
+            | (options.RelativePath != null ? FLAG_HAS_RELATIVE_PATH : 0)
             | (workingDirectory != null ? FLAG_HAS_WORKING_DIR : 0)
             | (arguments != null ? FLAG_HAS_ARGUMENTS : 0)
             | (iconLocation != null ? FLAG_HAS_ICON_LOCATION : 0)
+            | (unicode ? FLAG_IS_UNICODE : 0)
             | (runAsAdmin ? FLAG_RUN_AS_USER : 0)
             | flagEnv;
 
@@ -365,20 +599,58 @@ public static class Shortcut
             // Write TerminalID.
             writer.Write(terminalId);
 
-            // Write optional strings.
-            WriteStringData(writer, description);
-            WriteStringData(writer, workingDirectory);
-            if (padArguments && arguments != null)
-                WritePaddedArguments(writer, arguments);
-            else
-                WriteStringData(writer, arguments);
-            WriteStringData(writer, iconLocation);
+            // Write LinkInfo structure (if provided).
+            if (options.LinkInfo != null)
+            {
+                WriteLinkInfo(writer, options.LinkInfo);
+            }
 
-            // Now write the extra data block for environment variables (if needed)
-            // This block MUST come last in the extra data chain.
+            // Write optional string data (order per spec: description, relative path, working dir, arguments, icon location).
+            WriteStringData(writer, description, unicode);
+            WriteStringData(writer, options.RelativePath, unicode);
+            WriteStringData(writer, workingDirectory, unicode);
+            if (padArguments && arguments != null)
+                WritePaddedArguments(writer, arguments, unicode);
+            else
+                WriteStringData(writer, arguments, unicode);
+            WriteStringData(writer, iconLocation, unicode);
+
+            // --- Extra data blocks ---
+
+            // EnvironmentVariableDataBlock (if target contains environment variables)
             if (target.Contains("%"))
             {
-                WriteEnvVarDataBlock(writer, target);
+                WriteEnvironmentDataBlock(writer, target, EnvVarBlockSignature);
+            }
+
+            // IconEnvironmentDataBlock
+            if (options.IconEnvironmentPath != null)
+            {
+                WriteEnvironmentDataBlock(writer, options.IconEnvironmentPath, IconEnvBlockSignature);
+            }
+
+            // KnownFolderDataBlock
+            if (options.KnownFolder != null)
+            {
+                WriteKnownFolderDataBlock(writer, options.KnownFolder);
+            }
+
+            // SpecialFolderDataBlock
+            if (options.SpecialFolder != null)
+            {
+                WriteSpecialFolderDataBlock(writer, options.SpecialFolder);
+            }
+
+            // TrackerDataBlock
+            if (options.Tracker != null)
+            {
+                WriteTrackerDataBlock(writer, options.Tracker);
+            }
+
+            // PropertyStoreDataBlock
+            if (options.PropertyStoreData != null)
+            {
+                WritePropertyStoreDataBlock(writer, options.PropertyStoreData);
             }
 
             // Terminate extra data chain with a 4-byte zero.
