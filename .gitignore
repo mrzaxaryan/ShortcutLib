@@ -367,3 +367,4 @@ FodyWeavers.xsd
 /WebApi/appsettings.Staging.json
 /WebApi/appsettings.Production.json
 /WebApi/storage
+/samples/output
