@@ -29,18 +29,8 @@ jobs:
         run: dotnet test --no-build --configuration Release --verbosity normal
 
       - name: Pack
-        run: dotnet pack LNKLib/LNKLib.csproj --configuration Release --output ./nupkg
+        run: dotnet pack LNKLib/LNKLib.csproj --configuration Release -p:PackageOutputPath=${{ github.workspace }}/nupkg
 
       - name: Push to NuGet
-        run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        run: dotnet nuget push ${{ github.workspace }}/nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
 
-      - name: Publish self-contained
-        run: dotnet publish LNKLib/LNKLib.csproj --configuration Release --output ./publish
-
-      - name: Zip artifacts
-        run: Compress-Archive -Path ./publish/* -DestinationPath ./LNKLib-${{ github.event.release.tag_name }}.zip
-
-      - name: Upload release assets
-        run: gh release upload ${{ github.event.release.tag_name }} ./LNKLib-${{ github.event.release.tag_name }}.zip --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
