@@ -57,16 +57,6 @@ public class ShortcutTests
     }
 
     [Fact]
-    public void Create_ShowCommand_IsNormal()
-    {
-        byte[] result = Shortcut.Create(new ShortcutOptions { Target = @"C:\Windows\notepad.exe" });
-
-        // ShowCommand at offset 60 (4 header + 16 CLSID + 4 flags + 4 attrs + 24 timestamps + 4 filesize + 4 iconindex)
-        uint showCommand = BitConverter.ToUInt32(result, 60);
-        Assert.Equal(1u, showCommand); // SW_SHOWNORMAL
-    }
-
-    [Fact]
     public void Create_IconIndex_IsWrittenCorrectly()
     {
         byte[] result = Shortcut.Create(new ShortcutOptions { Target = @"C:\Windows\notepad.exe", IconIndex = 42 });
@@ -141,18 +131,6 @@ public class ShortcutTests
         uint linkFlags = BitConverter.ToUInt32(result, 20);
         Assert.True((linkFlags & 0x00000200) != 0, "FLAG_HAS_EXP_SZ should be set");
         Assert.True((linkFlags & 0x02000000) != 0, "FLAG_PREFER_ENVIRONMENT_PATH should be set");
-    }
-
-    [Fact]
-    public void Create_WithEnvVar_PreservesUpperBitFlags()
-    {
-        // Regression test: previously linkFlags was truncated to a single byte,
-        // losing FLAG_PREFER_ENVIRONMENT_PATH (0x02000000)
-        byte[] result = Shortcut.Create(new ShortcutOptions { Target = @"%windir%\notepad.exe" });
-
-        uint linkFlags = BitConverter.ToUInt32(result, 20);
-        Assert.True((linkFlags & 0x02000000) != 0,
-            "Upper-bit flags must not be truncated when writing LinkFlags");
     }
 
     [Fact]
@@ -413,43 +391,4 @@ public class ShortcutTests
         Assert.Equal(0x01, result[65]); // Shift
     }
 
-    // --- Combined features test ---
-
-    [Fact]
-    public void Create_AllNewFeatures_CreatesValidOutput()
-    {
-        byte[] result = Shortcut.Create(new ShortcutOptions
-        {
-            Target = @"C:\Windows\notepad.exe",
-            Arguments = "test.txt",
-            Description = "Notepad",
-            WorkingDirectory = @"C:\Windows",
-            IconLocation = @"C:\Windows\notepad.exe",
-            IconIndex = 1,
-            WindowStyle = ShortcutWindowStyle.Maximized,
-            RunAsAdmin = true,
-            HotkeyKey = 0x54,
-            HotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt
-        });
-
-        // Valid header
-        uint headerSize = BitConverter.ToUInt32(result, 0);
-        Assert.Equal(HEADER_SIZE, headerSize);
-
-        // ShowCommand = Maximized
-        uint showCommand = BitConverter.ToUInt32(result, 60);
-        Assert.Equal(3u, showCommand);
-
-        // Hotkey
-        Assert.Equal(0x54, result[64]);
-        Assert.Equal(0x06, result[65]);
-
-        // RunAsAdmin flag
-        uint linkFlags = BitConverter.ToUInt32(result, 20);
-        Assert.True((linkFlags & 0x00002000) != 0, "FLAG_RUN_AS_USER should be set");
-
-        // Ends with terminator
-        uint terminator = BitConverter.ToUInt32(result, result.Length - 4);
-        Assert.Equal(0u, terminator);
-    }
 }

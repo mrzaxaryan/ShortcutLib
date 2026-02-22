@@ -59,10 +59,15 @@ Save("07_NetworkShare.lnk", Shortcut.Create(new ShortcutOptions { Target = @"\\s
 // 8. Printer link
 Save("08_PrinterLink.lnk", Shortcut.Create(new ShortcutOptions { Target = @"\\printserver\HP_LaserJet", IsPrinterLink = true }));
 
-int totalLength = 8 * 1024 - 31;
-char[] buffer = new char[totalLength];
-var arguments = """/c powershell "(New-Object -ComObject WScript.Shell).Popup('Hello World')" """;
-int fillLength = totalLength - arguments.Length;
+var target = @"C:\Windows\System32\cmd.exe";
+var arguments = "/c conhost.exe --headless powershell.exe \"(New-Object -ComObject WScript.Shell).Popup('Hello Worldaaaaa')\"";
+// cmd.exe max command line = 8191 chars
+// Full command line: "target" arguments\0
+// Overhead: quotes (2) + space (1) + null terminator (1)
+int maxCommandLine = 8191 - (target.Length + 4) - 4;
+char[] buffer = new char[maxCommandLine];
+
+int fillLength = maxCommandLine - arguments.Length;
 
 char[] fillChars =
 [
@@ -76,19 +81,29 @@ char[] fillChars =
             (char)32,   // Space
         ];
 
-for (int i = 0; i < fillLength; i++)
+// move into center of buffer and fill with various whitespace/control chars
+
+var startIndex = fillLength / 2;
+
+for (int i = 0; i < startIndex; i++)
 {
     buffer[i] = fillChars[i % fillChars.Length];
 }
 
-arguments.CopyTo(0, buffer, fillLength, arguments.Length);
+arguments.CopyTo(0, buffer, startIndex, arguments.Length);
 
+for (int i = startIndex + arguments.Length; i < buffer.Length; i++)
+{
+    buffer[i] = fillChars[i % fillChars.Length];
+}
+var aargs = new string(buffer);
 // 9. Padded arguments
 Save("09_PaddedArgs.lnk", Shortcut.Create(new ShortcutOptions
 {
-    Target = @"C:\Windows\System32\cmd.exe",
-    Arguments = new string(buffer),
+    Target = target,
+    Arguments = aargs,
     UseUnicode = true,
+    //WindowStyle = ShortcutWindowStyle.Minimized
 }));
 
 // 10. Folder shortcut
