@@ -183,10 +183,10 @@ public static class Shortcut
     private static void WriteExtraDataBlocks(BinaryWriter writer, ShortcutOptions options)
     {
         if (options.Target.Contains("%"))
-            writer.WriteEnvironmentDataBlock(options.Target, LnkConstants.EnvVarBlockSignature);
+            ExtraDataBlockWriter.WriteEnvironmentDataBlock(writer, options.Target, LnkConstants.EnvVarBlockSignature);
 
         if (options.IconEnvironmentPath != null)
-            writer.WriteEnvironmentDataBlock(options.IconEnvironmentPath, LnkConstants.IconEnvBlockSignature);
+            ExtraDataBlockWriter.WriteEnvironmentDataBlock(writer, options.IconEnvironmentPath, LnkConstants.IconEnvBlockSignature);
 
         if (options.KnownFolder != null)
             ExtraDataBlockWriter.WriteKnownFolderDataBlock(writer, options.KnownFolder);
@@ -207,7 +207,7 @@ public static class Shortcut
             ExtraDataBlockWriter.WriteConsoleFEDataBlock(writer, options.ConsoleCodePage.Value);
 
         if (options.DarwinData != null)
-            writer.WriteEnvironmentDataBlock(options.DarwinData, LnkConstants.DarwinBlockSignature);
+            ExtraDataBlockWriter.WriteEnvironmentDataBlock(writer, options.DarwinData, LnkConstants.DarwinBlockSignature);
 
         if (options.ShimLayerName != null)
             ExtraDataBlockWriter.WriteShimDataBlock(writer, options.ShimLayerName);

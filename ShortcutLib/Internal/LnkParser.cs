@@ -396,40 +396,36 @@ internal static class LnkParser
         }
     }
 
-    private static void ReadEnvironmentVariableDataBlock(BinaryReader reader, ShortcutOptions options)
+    /// <summary>
+    /// Reads the 260-byte ANSI + 520-byte Unicode buffer layout shared by
+    /// EnvironmentVariable, IconEnvironment, and Darwin data blocks.
+    /// Returns the Unicode value if present, otherwise the ANSI value.
+    /// </summary>
+    private static string? ReadEnvironmentStyleBuffer(BinaryReader reader)
     {
-        // 260 bytes ANSI + 520 bytes Unicode
         byte[] ansiBuffer = reader.ReadBytes(LnkConstants.MaxPath);
         byte[] unicodeBuffer = reader.ReadBytes(LnkConstants.MaxPath * 2);
 
-        // Prefer Unicode path
         string unicodePath = Encoding.Unicode.GetString(unicodeBuffer).TrimEnd('\0');
         if (!string.IsNullOrEmpty(unicodePath))
-        {
-            options.Target = unicodePath;
-            return;
-        }
+            return unicodePath;
 
         string ansiPath = Encoding.Default.GetString(ansiBuffer).TrimEnd('\0');
-        if (!string.IsNullOrEmpty(ansiPath))
-            options.Target = ansiPath;
+        return !string.IsNullOrEmpty(ansiPath) ? ansiPath : null;
+    }
+
+    private static void ReadEnvironmentVariableDataBlock(BinaryReader reader, ShortcutOptions options)
+    {
+        var value = ReadEnvironmentStyleBuffer(reader);
+        if (value != null)
+            options.Target = value;
     }
 
     private static void ReadIconEnvironmentDataBlock(BinaryReader reader, ShortcutOptions options)
     {
-        byte[] ansiBuffer = reader.ReadBytes(LnkConstants.MaxPath);
-        byte[] unicodeBuffer = reader.ReadBytes(LnkConstants.MaxPath * 2);
-
-        string unicodePath = Encoding.Unicode.GetString(unicodeBuffer).TrimEnd('\0');
-        if (!string.IsNullOrEmpty(unicodePath))
-        {
-            options.IconEnvironmentPath = unicodePath;
-            return;
-        }
-
-        string ansiPath = Encoding.Default.GetString(ansiBuffer).TrimEnd('\0');
-        if (!string.IsNullOrEmpty(ansiPath))
-            options.IconEnvironmentPath = ansiPath;
+        var value = ReadEnvironmentStyleBuffer(reader);
+        if (value != null)
+            options.IconEnvironmentPath = value;
     }
 
     private static void ReadKnownFolderDataBlock(BinaryReader reader, ShortcutOptions options)
@@ -520,20 +516,9 @@ internal static class LnkParser
 
     private static void ReadDarwinDataBlock(BinaryReader reader, ShortcutOptions options)
     {
-        // Same layout as EnvironmentVariableDataBlock: 260 ANSI + 520 Unicode
-        byte[] ansiBuffer = reader.ReadBytes(LnkConstants.MaxPath);
-        byte[] unicodeBuffer = reader.ReadBytes(LnkConstants.MaxPath * 2);
-
-        string unicodePath = Encoding.Unicode.GetString(unicodeBuffer).TrimEnd('\0');
-        if (!string.IsNullOrEmpty(unicodePath))
-        {
-            options.DarwinData = unicodePath;
-            return;
-        }
-
-        string ansiPath = Encoding.Default.GetString(ansiBuffer).TrimEnd('\0');
-        if (!string.IsNullOrEmpty(ansiPath))
-            options.DarwinData = ansiPath;
+        var value = ReadEnvironmentStyleBuffer(reader);
+        if (value != null)
+            options.DarwinData = value;
     }
 
     private static void ReadShimDataBlock(BinaryReader reader, ShortcutOptions options, int dataLength)

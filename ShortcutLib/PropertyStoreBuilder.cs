@@ -201,121 +201,90 @@ public sealed class PropertyStoreBuilder
         WriteStorage(writer, SystemFormatId, entries);
     }
 
+    /// <summary>
+    /// Writes the common storage frame: size prefix, "1SPS" magic, format ID,
+    /// then delegates entry writing to the caller, followed by a terminal entry.
+    /// </summary>
+    private static void WriteStorageFrame(BinaryWriter writer, Guid formatId, Action<BinaryWriter> writeEntries)
+    {
+        using var storageMs = new MemoryStream();
+        using var storageWriter = new BinaryWriter(storageMs);
+
+        storageWriter.Write(0x53505331u); // "1SPS"
+        storageWriter.Write(formatId.ToByteArray());
+        writeEntries(storageWriter);
+        storageWriter.Write(0); // Terminal entry
+
+        storageWriter.Flush();
+        byte[] storageData = storageMs.ToArray();
+
+        writer.Write(4 + storageData.Length); // StorageSize
+        writer.Write(storageData);
+    }
+
     private void WriteNamedPropertyStorage(BinaryWriter writer)
     {
         if (_namedProperties.Count == 0) return;
 
-        // Build the storage body
-        using var storageMs = new MemoryStream();
-        using var storageWriter = new BinaryWriter(storageMs);
-
-        // Version: "1SPS" = 0x53505331
-        storageWriter.Write(0x53505331u);
-        // FormatID (16 bytes)
-        storageWriter.Write(NamedPropertyFormatId.ToByteArray());
-
-        // Write each named property entry
-        foreach (var (name, value) in _namedProperties)
+        WriteStorageFrame(writer, NamedPropertyFormatId, storageWriter =>
         {
-            // String-named entries:
-            // ValueSize (4) + NameSize (4) + Reserved (1) + Name (UTF-16LE null-terminated) + Value
-            byte[] nameBytes = Encoding.Unicode.GetBytes(name + "\0");
-            int valueSize = 4 + 4 + 1 + nameBytes.Length + value.Length;
-            storageWriter.Write(valueSize);
-            storageWriter.Write(nameBytes.Length);
-            storageWriter.Write((byte)0); // Reserved
-            storageWriter.Write(nameBytes);
-            storageWriter.Write(value);
-        }
-
-        // Terminal entry: ValueSize = 0
-        storageWriter.Write(0);
-
-        storageWriter.Flush();
-        byte[] storageData = storageMs.ToArray();
-
-        // StorageSize = 4 (this field) + storageData.Length
-        writer.Write(4 + storageData.Length);
-        writer.Write(storageData);
+            foreach (var (name, value) in _namedProperties)
+            {
+                byte[] nameBytes = Encoding.Unicode.GetBytes(name + "\0");
+                int valueSize = 4 + 4 + 1 + nameBytes.Length + value.Length;
+                storageWriter.Write(valueSize);
+                storageWriter.Write(nameBytes.Length);
+                storageWriter.Write((byte)0); // Reserved
+                storageWriter.Write(nameBytes);
+                storageWriter.Write(value);
+            }
+        });
     }
 
     private static void WriteStorage(BinaryWriter writer, Guid formatId, List<(uint pid, byte[] value)> entries)
     {
-        // Build the storage body first to compute total size
-        using var storageMs = new MemoryStream();
-        using var storageWriter = new BinaryWriter(storageMs);
-
-        // Version: "1SPS" = 0x53505331
-        storageWriter.Write(0x53505331u);
-        // FormatID (16 bytes)
-        storageWriter.Write(formatId.ToByteArray());
-
-        // Write each property entry
-        foreach (var (pid, value) in entries)
+        WriteStorageFrame(writer, formatId, storageWriter =>
         {
-            // ValueSize includes itself (4) + nameOrId (4) + reserved (1) + value bytes
-            int valueSize = 4 + 4 + 1 + value.Length;
-            storageWriter.Write(valueSize);
-            storageWriter.Write(pid);
-            storageWriter.Write((byte)0); // Reserved
-            storageWriter.Write(value);
-        }
-
-        // Terminal entry: ValueSize = 0
-        storageWriter.Write(0);
-
-        storageWriter.Flush();
-        byte[] storageData = storageMs.ToArray();
-
-        // StorageSize = 4 (this field) + storageData.Length
-        writer.Write(4 + storageData.Length);
-        writer.Write(storageData);
+            foreach (var (pid, value) in entries)
+            {
+                int valueSize = 4 + 4 + 1 + value.Length;
+                storageWriter.Write(valueSize);
+                storageWriter.Write(pid);
+                storageWriter.Write((byte)0); // Reserved
+                storageWriter.Write(value);
+            }
+        });
     }
 
-    private static byte[] SerializeString(string value)
+    private static byte[] SerializeProperty(ushort vtType, Action<BinaryWriter> writeValue)
     {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
-        w.Write(VT_LPWSTR);
+        w.Write(vtType);
         w.Write((ushort)0); // padding
-        byte[] strBytes = Encoding.Unicode.GetBytes(value + "\0");
-        w.Write(strBytes.Length);
-        w.Write(strBytes);
+        writeValue(w);
         w.Flush();
         return ms.ToArray();
     }
 
-    private static byte[] SerializeBool(bool value)
-    {
-        using var ms = new MemoryStream();
-        using var w = new BinaryWriter(ms);
-        w.Write(VT_BOOL);
-        w.Write((ushort)0); // padding
-        w.Write(value ? (short)-1 : (short)0); // VT_BOOL: -1 = true, 0 = false
-        w.Write((short)0); // padding to 4-byte boundary
-        w.Flush();
-        return ms.ToArray();
-    }
+    private static byte[] SerializeString(string value) =>
+        SerializeProperty(VT_LPWSTR, w =>
+        {
+            byte[] strBytes = Encoding.Unicode.GetBytes(value + "\0");
+            w.Write(strBytes.Length);
+            w.Write(strBytes);
+        });
 
-    private static byte[] SerializeClsid(Guid value)
-    {
-        using var ms = new MemoryStream();
-        using var w = new BinaryWriter(ms);
-        w.Write(VT_CLSID);
-        w.Write((ushort)0); // padding
-        w.Write(value.ToByteArray());
-        w.Flush();
-        return ms.ToArray();
-    }
+    private static byte[] SerializeBool(bool value) =>
+        SerializeProperty(VT_BOOL, w =>
+        {
+            w.Write(value ? (short)-1 : (short)0); // VT_BOOL: -1 = true, 0 = false
+            w.Write((short)0); // padding to 4-byte boundary
+        });
 
-    private static byte[] SerializeUInt32(uint value)
-    {
-        using var ms = new MemoryStream();
-        using var w = new BinaryWriter(ms);
-        w.Write(VT_UI4);
-        w.Write((ushort)0); // padding
-        w.Write(value);
-        w.Flush();
-        return ms.ToArray();
-    }
+    private static byte[] SerializeClsid(Guid value) =>
+        SerializeProperty(VT_CLSID, w => w.Write(value.ToByteArray()));
+
+    private static byte[] SerializeUInt32(uint value) =>
+        SerializeProperty(VT_UI4, w => w.Write(value));
 }
