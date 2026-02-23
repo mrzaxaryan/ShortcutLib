@@ -1,10 +1,12 @@
 # ShortcutLib
 
-A zero-dependency .NET library for creating Windows Shell Link (.lnk) shortcut files in memory.
+A zero-dependency .NET library for creating, opening, and editing Windows Shell Link (.lnk) shortcut files in memory.
 
 ## Features
 
 - Create shortcuts to local files, folders, network shares, and printers
+- Open and parse existing .lnk files back into structured options
+- Edit existing shortcuts by modifying properties and re-serializing
 - Environment variable support (e.g. `%windir%\notepad.exe`)
 - Custom icon, arguments, working directory, and description
 - Window style control (normal, maximized, minimized)
@@ -205,7 +207,73 @@ byte[] lnk = Shortcut.Create(new ShortcutOptions
 });
 ```
 
+### Opening Shortcuts
+
+Parse an existing `.lnk` file to inspect or reuse its properties:
+
+```csharp
+using ShortcutLib;
+
+// Read an existing shortcut
+byte[] data = File.ReadAllBytes("Notepad.lnk");
+ShortcutOptions options = Shortcut.Open(data);
+
+Console.WriteLine(options.Target);           // C:\Windows\notepad.exe
+Console.WriteLine(options.Description);      // My Notepad Shortcut
+Console.WriteLine(options.WindowStyle);      // Normal
+Console.WriteLine(options.RunAsAdmin);       // False
+```
+
+### Editing Shortcuts
+
+Modify specific properties of an existing shortcut without rebuilding from scratch:
+
+```csharp
+using ShortcutLib;
+
+byte[] original = File.ReadAllBytes("Notepad.lnk");
+
+// Change target and add arguments
+byte[] modified = Shortcut.Edit(original, options =>
+{
+    options.Target = @"C:\Windows\System32\cmd.exe";
+    options.Arguments = "/k echo Hello";
+    options.RunAsAdmin = true;
+});
+
+File.WriteAllBytes("Admin-CMD.lnk", modified);
+
+// Change window style
+byte[] maximized = Shortcut.Edit(original, options =>
+{
+    options.WindowStyle = ShortcutWindowStyle.Maximized;
+});
+
+// Add a hotkey
+byte[] withHotkey = Shortcut.Edit(original, options =>
+{
+    options.HotkeyKey = 0x54;  // 'T'
+    options.HotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt;
+});
+```
+
 ## API
+
+### Shortcut.Open
+
+```csharp
+public static ShortcutOptions Shortcut.Open(byte[] data)
+```
+
+Parses a `.lnk` file's binary content and returns a `ShortcutOptions` object with all recognized properties populated. Throws `ArgumentException` if data is too short and `FormatException` if the header is invalid.
+
+### Shortcut.Edit
+
+```csharp
+public static byte[] Shortcut.Edit(byte[] data, Action<ShortcutOptions> modify)
+```
+
+Opens an existing `.lnk` file, applies the modification callback, and returns the re-serialized result as a new byte array. Unmodified properties are preserved.
 
 ### Shortcut.Create (parameter overload)
 

@@ -15,6 +15,9 @@ public static class Shortcut
     /// </summary>
     public static byte[] Create(ShortcutOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentException.ThrowIfNullOrEmpty(options.Target, nameof(options.Target));
+
         var pathInfo = TargetPathInfo.Parse(options.Target, options.IsPrinterLink);
         int linkFlags = ComputeFlags(options);
 
@@ -80,6 +83,32 @@ public static class Shortcut
         writer.WriteStringData(options.WorkingDirectory, unicode);
         writer.WriteStringData(options.Arguments, unicode);
         writer.WriteStringData(options.IconLocation, unicode);
+    }
+
+    /// <summary>
+    /// Parses a Windows Shortcut (.lnk) file from its binary content
+    /// and returns a ShortcutOptions object representing its configuration.
+    /// </summary>
+    public static ShortcutOptions Open(byte[] data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        if (data.Length < 76)
+            throw new ArgumentException("Data is too short to be a valid .lnk file.", nameof(data));
+        return LnkParser.Parse(data);
+    }
+
+    /// <summary>
+    /// Opens an existing Windows Shortcut (.lnk) file, applies modifications
+    /// via the provided callback, and returns the modified file as a new byte array.
+    /// </summary>
+    public static byte[] Edit(byte[] data, Action<ShortcutOptions> modify)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(modify);
+
+        var options = Open(data);
+        modify(options);
+        return Create(options);
     }
 
     private static void WriteExtraDataBlocks(BinaryWriter writer, ShortcutOptions options)

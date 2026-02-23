@@ -6,8 +6,8 @@ namespace ShortcutLib;
 public sealed class KnownFolderData
 {
     /// <summary>GUID of the known folder.</summary>
-    public required Guid FolderId { get; init; }
+    public Guid FolderId { get; set; }
 
     /// <summary>Offset into the IDList.</summary>
-    public uint Offset { get; init; }
+    public uint Offset { get; set; }
 }

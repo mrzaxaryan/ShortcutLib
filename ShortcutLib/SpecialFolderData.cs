@@ -6,8 +6,8 @@ namespace ShortcutLib;
 public sealed class SpecialFolderData
 {
     /// <summary>CSIDL value identifying the special folder.</summary>
-    public required uint FolderId { get; init; }
+    public uint FolderId { get; set; }
 
     /// <summary>Offset into the IDList.</summary>
-    public uint Offset { get; init; }
+    public uint Offset { get; set; }
 }
