@@ -29,7 +29,9 @@ jobs:
         run: dotnet test --no-build --configuration Release --verbosity normal
 
       - name: Pack
-        run: dotnet pack ShortcutLib/ShortcutLib.csproj --configuration Release -p:PackageOutputPath=${{ github.workspace }}/nupkg
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
+        run: dotnet pack ShortcutLib/ShortcutLib.csproj --configuration Release -p:PackageOutputPath=${{ github.workspace }}/nupkg -p:Version=${VERSION#v}
 
       - name: Push to NuGet
         run: dotnet nuget push ${{ github.workspace }}/nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json

@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>ShortcutLib</PackageId>
-    <Version>1.0.1</Version>
+
     <Description>A zero-dependency library for creating Windows Shell Link (.lnk) shortcut files in memory.</Description>
     <Authors>mrzaxaryan</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
