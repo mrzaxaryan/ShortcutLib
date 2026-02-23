@@ -18,6 +18,22 @@ internal static class LnkParser
         if ((linkFlags & (uint)LinkFlags.HasLinkInfo) != 0)
             ReadLinkInfo(reader, options);
 
+        // Prefer LinkInfo paths over IDList-reconstructed target.
+        // LinkInfo contains clean path strings, while the IDList may yield
+        // garbled text from Windows-generated shell items with binary metadata
+        // or 8.3 short filenames instead of long names.
+        if (options.LinkInfo?.Local != null && !string.IsNullOrEmpty(options.LinkInfo.Local.BasePath))
+        {
+            options.Target = options.LinkInfo.Local.BasePath;
+        }
+        else if (options.LinkInfo?.Network != null && !string.IsNullOrEmpty(options.LinkInfo.Network.ShareName))
+        {
+            string target = options.LinkInfo.Network.ShareName;
+            if (!string.IsNullOrEmpty(options.LinkInfo.Network.CommonPathSuffix))
+                target += @"\" + options.LinkInfo.Network.CommonPathSuffix;
+            options.Target = target;
+        }
+
         ReadStringData(reader, options, linkFlags);
         ReadExtraDataBlocks(reader, options);
 
@@ -71,7 +87,7 @@ internal static class LnkParser
 
         bool isNetworkLink = false;
         string targetRoot = "";
-        string? targetLeaf = null;
+        var leafParts = new List<string>();
         bool isPrinterLink = false;
 
         int itemIndex = 0;
@@ -93,9 +109,11 @@ internal static class LnkParser
             {
                 (targetRoot, isPrinterLink) = ParseRootPathItem(itemData, isNetworkLink);
             }
-            else if (itemIndex == 2) // Leaf item
+            else // Leaf items (index >= 2, may be multiple for deep paths)
             {
-                targetLeaf = ParseLeafItem(itemData);
+                string part = ParseLeafItem(itemData);
+                if (!string.IsNullOrEmpty(part))
+                    leafParts.Add(part);
             }
 
             itemIndex++;
@@ -105,6 +123,8 @@ internal static class LnkParser
         reader.BaseStream.Position = endPosition;
 
         // Reconstruct target path
+        string? targetLeaf = leafParts.Count > 0 ? string.Join(@"\", leafParts) : null;
+
         if (isNetworkLink)
         {
             if (isPrinterLink || targetLeaf == null)
@@ -149,9 +169,14 @@ internal static class LnkParser
             prefixLength = 1; // 0x2F
         }
 
-        string raw = Encoding.Default.GetString(data, prefixLength, data.Length - prefixLength);
-        string root = raw.TrimEnd('\0');
+        // Read only until the first null byte to avoid consuming binary metadata
+        // that follows the null-terminated path string in Windows-generated shell items
+        int end = Array.IndexOf(data, (byte)0, prefixLength);
+        if (end < 0) end = data.Length;
+        int length = end - prefixLength;
+        if (length <= 0) return ("", isPrinter);
 
+        string root = Encoding.Default.GetString(data, prefixLength, length);
         return (root, isPrinter);
     }
 
@@ -159,9 +184,17 @@ internal static class LnkParser
     {
         // Leaf items always have a 12-byte prefix (PrefixFile or PrefixFolder)
         const int prefixLength = 12;
+        if (data.Length <= prefixLength) return "";
 
-        string raw = Encoding.Default.GetString(data, prefixLength, data.Length - prefixLength);
-        return raw.TrimEnd('\0');
+        // Read only until the first null byte to avoid consuming binary metadata
+        // (timestamps, extension blocks, Unicode names) that follows the null-terminated
+        // short filename in Windows-generated shell items
+        int end = Array.IndexOf(data, (byte)0, prefixLength);
+        if (end < 0) end = data.Length;
+        int length = end - prefixLength;
+        if (length <= 0) return "";
+
+        return Encoding.Default.GetString(data, prefixLength, length);
     }
 
     private static void ReadLinkInfo(BinaryReader reader, ShortcutOptions options)
