@@ -22,7 +22,10 @@ A zero-dependency .NET library for creating, opening, and editing Windows Shell 
 - All 27 LinkFlags from the MS-SHLLINK spec (AllowLinkToLink, ForceNoLinkTrack, etc.)
 - FileAttributes enum (ReadOnly, Hidden, System, Encrypted, etc.)
 - Network path enhancements (DeviceName, NetworkProviderType)
-- PropertyStoreBuilder for typed AppUserModelID, ToastActivatorCLSID, PreventPinning
+- PropertyStoreBuilder for typed AppUserModelID, ToastActivatorCLSID, PreventPinning, and more
+- Arbitrary named property support in PropertyStoreBuilder
+- Named constants: DriveTypes, CsidlFolderIds, VirtualKeys, ConsoleFillAttributes, ConsoleFontFamilies, ShimLayerNames
+- ShortcutSanitizer for stripping privacy-sensitive metadata (machine name, MAC address, etc.)
 - Overlay data (post-terminal block data) preservation
 - Returns raw `byte[]` — no COM interop or Windows Shell dependency
 - Targets .NET 10
@@ -72,7 +75,7 @@ byte[] lnk = Shortcut.Create(new ShortcutOptions
         Local = new LocalPathInfo
         {
             BasePath = @"C:\Windows\notepad.exe",
-            DriveType = 3,               // DRIVE_FIXED
+            DriveType = DriveTypes.Fixed,
             DriveSerialNumber = 0x1234ABCD,
             VolumeLabel = "Windows"
         }
@@ -128,7 +131,7 @@ byte[] lnk = Shortcut.Create(new ShortcutOptions
     Target = @"C:\Windows\notepad.exe",
     SpecialFolder = new SpecialFolderData
     {
-        FolderId = 0x0024   // CSIDL_WINDOWS
+        FolderId = CsidlFolderIds.Windows
     }
 });
 
@@ -159,7 +162,7 @@ byte[] lnk = Shortcut.Create(new ShortcutOptions
 byte[] lnk = Shortcut.Create(new ShortcutOptions
 {
     Target = @"C:\OldApp\setup.exe",
-    ShimLayerName = "WINXP"
+    ShimLayerName = ShimLayerNames.WinXPSP3
 });
 
 // Explicit file attributes
@@ -197,6 +200,25 @@ byte[] lnk = Shortcut.Create(new ShortcutOptions
     PropertyStoreData = builder.Build()
 });
 
+// PropertyStore with System.Link and named properties
+var builder = new PropertyStoreBuilder
+{
+    AppUserModelId = "MyCompany.MyApp",
+    TargetParsingPath = @"C:\MyApp\app.exe",
+    ItemTypeText = "Application"
+};
+builder.AddNamedStringProperty("CustomTag", "MyValue");
+byte[] lnk = Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\MyApp\app.exe",
+    PropertyStoreData = builder.Build()
+});
+
+// Strip privacy-sensitive metadata (machine name, MAC address, etc.)
+byte[] original = File.ReadAllBytes("shortcut.lnk");
+byte[] sanitized = ShortcutSanitizer.SanitizeBytes(original);
+File.WriteAllBytes("clean.lnk", sanitized);
+
 // Allow shortcut to link to another .lnk file
 byte[] lnk = Shortcut.Create(new ShortcutOptions
 {
@@ -214,7 +236,7 @@ byte[] lnk = Shortcut.Create(new ShortcutOptions
     IconLocation = @"C:\Windows\notepad.exe",
     WindowStyle = ShortcutWindowStyle.Maximized,
     RunAsAdmin = true,
-    HotkeyKey = 0x54,
+    HotkeyKey = VirtualKeys.T,
     HotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
     UseUnicode = true,
     CreationTime = DateTime.UtcNow,
@@ -283,7 +305,7 @@ byte[] maximized = Shortcut.Edit(original, options =>
 // Add a hotkey
 byte[] withHotkey = Shortcut.Edit(original, options =>
 {
-    options.HotkeyKey = 0x54;  // 'T'
+    options.HotkeyKey = VirtualKeys.T;
     options.HotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt;
 });
 ```
@@ -378,7 +400,7 @@ Combinable flags for hotkey modifier keys:
 | `Control` | Control key |
 | `Alt` | Alt key |
 
-The `hotkeyKey` parameter accepts a [virtual key code](https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes). Common values: `0x41`–`0x5A` for A–Z, `0x70`–`0x87` for F1–F24.
+Use `VirtualKeys` constants for `HotkeyKey`: `VirtualKeys.A`–`VirtualKeys.Z`, `VirtualKeys.D0`–`VirtualKeys.D9`, `VirtualKeys.F1`–`VirtualKeys.F24`, `VirtualKeys.NumLock`, `VirtualKeys.ScrollLock`.
 
 ### LinkInfo
 
@@ -389,7 +411,7 @@ Describes the target's location per [MS-SHLLINK] 2.3. Provide `Local`, `Network`
 | Property | Type | Default | Description |
 |---|---|---|---|
 | `BasePath` | `string` | *(required)* | Full local path to target |
-| `DriveType` | `uint` | `3` | Drive type (3 = DRIVE_FIXED) |
+| `DriveType` | `uint` | `DriveTypes.Fixed` | Drive type (see `DriveTypes`) |
 | `DriveSerialNumber` | `uint` | `0` | Volume serial number |
 | `VolumeLabel` | `string` | `""` | Volume label |
 
@@ -411,9 +433,21 @@ Describes the target's location per [MS-SHLLINK] 2.3. Provide `Local`, `Network`
 
 ### KnownFolderIds
 
-Predefined GUIDs for common known folders:
+Predefined GUIDs for common known folders (55 constants):
 
-`Desktop`, `Documents`, `Downloads`, `Music`, `Pictures`, `Videos`, `ProgramFiles`, `System`, `Windows`, `StartMenu`, `Startup`, `AppData`, `LocalAppData`, `ProgramData`, `UserProfiles`, `Fonts`
+**User folders:** `Desktop`, `Documents`, `Downloads`, `Music`, `Pictures`, `Videos`, `Profile`, `SavedGames`, `Contacts`, `Searches`, `Favorites`, `Links`, `Templates`
+
+**System:** `ProgramFiles`, `ProgramFilesX86`, `ProgramFilesCommon`, `ProgramFilesCommonX86`, `System`, `SystemX86`, `Windows`, `Fonts`
+
+**Application data:** `AppData`, `LocalAppData`, `LocalAppDataLow`, `ProgramData`
+
+**Start menu:** `StartMenu`, `Programs`, `Startup`, `AdminTools`
+
+**Common (all-users):** `CommonStartMenu`, `CommonPrograms`, `CommonStartup`, `CommonDesktopDir`, `CommonTemplates`, `CommonAdminTools`
+
+**Public:** `UserProfiles`, `Public`, `PublicDesktop`, `PublicDocuments`, `PublicDownloads`, `PublicMusic`, `PublicPictures`, `PublicVideos`
+
+**Shell locations:** `RecycleBin`, `QuickLaunch`, `SendTo`, `Recent`, `PrintHood`, `NetHood`, `Cookies`, `History`, `InternetCache`, `UserProgramFiles`
 
 ### TrackerData
 
@@ -471,7 +505,7 @@ Console display settings for ConsoleDataBlock (signature `0xA0000002`, 204 bytes
 
 ### NetworkProviderTypes
 
-Well-known `WNNC_NET_*` constants: `Lanman` (0x00020000), `Netware`, `SunPcNfs`, `Vines`, `Dfs`, `TerminalServices`, `OpenAfs`, `MsNfs`, `Google`, `VMware`
+Well-known `WNNC_NET_*` constants (45 values): `Lanman`, `Netware`, `SunPcNfs`, `Vines`, `Avid`, `Docuspace`, `Mangosoft`, `Sernet`, `Riverfront1`, `Riverfront2`, `Decorb`, `Protstor`, `FjRedir`, `Distinct`, `Twins`, `Rdr2Sample`, `Csc`, `ThreeIn1`, `ExtendNet`, `Stac`, `Foxbat`, `Yahoo`, `Exifs`, `Dav`, `Knoware`, `ObjectDire`, `Masfax`, `HobNfs`, `Shiva`, `Ibmal`, `Lock`, `TerminalServices`, `Srt`, `Quincy`, `OpenAfs`, `Avid1`, `Dfs`, `Kwnp`, `Zenworks`, `DriveOnWeb`, `VMware`, `Rsfx`, `Mfiles`, `MsNfs`, `Google`
 
 ### PropertyStoreBuilder
 
@@ -502,6 +536,73 @@ byte[] lnk = Shortcut.Create(new ShortcutOptions
 | `RelaunchIconResource` | `string?` | Relaunch icon |
 | `ExcludeFromShowInNewInstall` | `bool?` | Hide from "New programs" list |
 | `IsDestListSeparator` | `bool?` | Jump list separator |
+| `TargetParsingPath` | `string?` | System.Link.TargetParsingPath — canonical target path |
+| `TargetSFGAOFlags` | `uint?` | System.Link.TargetSFGAOFlags — shell attributes |
+| `ItemTypeText` | `string?` | System.ItemTypeText — file type description |
+| `MimeType` | `string?` | System.MIMEType — MIME type of target |
+
+**Named properties** (arbitrary string-keyed name/value pairs):
+
+```csharp
+var builder = new PropertyStoreBuilder();
+builder.AddNamedStringProperty("CustomKey", "CustomValue")
+       .AddNamedUInt32Property("Count", 42)
+       .AddNamedBoolProperty("Enabled", true);
+```
+
+| Method | Description |
+|---|---|
+| `AddNamedStringProperty(name, value)` | Add custom string property |
+| `AddNamedUInt32Property(name, value)` | Add custom uint32 property |
+| `AddNamedBoolProperty(name, value)` | Add custom bool property |
+
+### ShortcutSanitizer
+
+Strips privacy-sensitive metadata from shortcut files. LNK files may contain forensic artifacts: machine name and MAC address (TrackerData), file owner and computer name (PropertyStoreData), and unstructured data after the terminal block (OverlayData).
+
+```csharp
+// Sanitize in-place
+ShortcutSanitizer.Sanitize(options);
+
+// Or sanitize a raw byte array
+byte[] clean = ShortcutSanitizer.SanitizeBytes(File.ReadAllBytes("shortcut.lnk"));
+```
+
+### DriveTypes
+
+Drive type constants for `LocalPathInfo.DriveType`:
+
+`Unknown` (0), `NoRootDir` (1), `Removable` (2), `Fixed` (3), `Remote` (4), `CDRom` (5), `RamDisk` (6)
+
+### CsidlFolderIds
+
+CSIDL folder ID constants for `SpecialFolderData.FolderId` (45 values):
+
+`Desktop`, `Internet`, `Programs`, `Controls`, `Printers`, `Personal`, `Favorites`, `Startup`, `Recent`, `SendTo`, `RecycleBin`, `StartMenu`, `MyMusic`, `MyVideo`, `DesktopDirectory`, `Drives`, `Network`, `NetHood`, `Fonts`, `Templates`, `CommonStartMenu`, `CommonPrograms`, `CommonStartup`, `CommonDesktopDirectory`, `AppData`, `PrintHood`, `LocalAppData`, `CommonAppData`, `Windows`, `System`, `ProgramFiles`, `MyPictures`, `Profile`, `SystemX86`, `ProgramFilesX86`, `CommonFiles`, `CommonFilesX86`, `CommonTemplates`, `CommonDocuments`, `AdminTools`, `CommonAdminTools`, `Cookies`, `History`, `InternetCache`
+
+### VirtualKeys
+
+Virtual key code constants for `ShortcutOptions.HotkeyKey`:
+
+**Letters:** `A`–`Z` (0x41–0x5A) | **Digits:** `D0`–`D9` (0x30–0x39) | **Function keys:** `F1`–`F24` (0x70–0x87) | **Toggle:** `NumLock`, `ScrollLock`
+
+### ConsoleFillAttributes
+
+Console color flag constants for `ConsoleData.FillAttributes` and `PopupFillAttributes`:
+
+`ForegroundBlue`, `ForegroundGreen`, `ForegroundRed`, `ForegroundIntensity`, `BackgroundBlue`, `BackgroundGreen`, `BackgroundRed`, `BackgroundIntensity`
+
+### ConsoleFontFamilies
+
+Font family and pitch constants for `ConsoleData.FontFamily`:
+
+**Families:** `DontCare`, `Roman`, `Swiss`, `Modern`, `Script`, `Decorative` | **Pitch:** `FixedPitch`, `Vector`, `TrueType`, `Device`
+
+### ShimLayerNames
+
+Common compatibility shim layer names for `ShortcutOptions.ShimLayerName`:
+
+`WinXPSP3`, `WinXPSP2`, `WinVistaSP2`, `Win7RTM`, `Win8RTM`, `Color256`, `Resolution640x480`, `DisableNXShowUI`, `HighDpiAware`, `DisableThemes`, `RunAsAdmin`, `ForceDirectDrawEmulation`
 
 ### Argument Padding
 
