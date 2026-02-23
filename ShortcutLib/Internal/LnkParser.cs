@@ -37,6 +37,14 @@ internal static class LnkParser
         ReadStringData(reader, options, linkFlags);
         ReadExtraDataBlocks(reader, options);
 
+        // Read overlay data (anything after the terminal block)
+        if (reader.BaseStream.Position < reader.BaseStream.Length)
+        {
+            int remaining = (int)(reader.BaseStream.Length - reader.BaseStream.Position);
+            if (remaining > 0)
+                options.OverlayData = reader.ReadBytes(remaining);
+        }
+
         return options;
     }
 
@@ -52,7 +60,8 @@ internal static class LnkParser
             throw new FormatException("Invalid .lnk file: CLSID mismatch.");
 
         uint linkFlags = reader.ReadUInt32();
-        reader.ReadUInt32(); // FileAttributes (reconstructed from Target on re-serialize)
+        uint fileAttributes = reader.ReadUInt32();
+        options.FileAttributes = (FileAttributes)fileAttributes;
 
         // Timestamps
         long creationTime = reader.ReadInt64();
@@ -76,6 +85,17 @@ internal static class LnkParser
         // Flags → boolean properties
         options.UseUnicode = (linkFlags & (uint)LinkFlags.IsUnicode) != 0;
         options.RunAsAdmin = (linkFlags & (uint)LinkFlags.RunAsUser) != 0;
+        options.ForceNoLinkInfo = (linkFlags & (uint)LinkFlags.ForceNoLinkInfo) != 0;
+        options.RunInSeparateProcess = (linkFlags & (uint)LinkFlags.RunInSeparateProcess) != 0;
+        options.NoPidlAlias = (linkFlags & (uint)LinkFlags.NoPidlAlias) != 0;
+        options.ForceNoLinkTrack = (linkFlags & (uint)LinkFlags.ForceNoLinkTrack) != 0;
+        options.EnableTargetMetadata = (linkFlags & (uint)LinkFlags.EnableTargetMetadata) != 0;
+        options.DisableLinkPathTracking = (linkFlags & (uint)LinkFlags.DisableLinkPathTracking) != 0;
+        options.DisableKnownFolderTracking = (linkFlags & (uint)LinkFlags.DisableKnownFolderTracking) != 0;
+        options.DisableKnownFolderAlias = (linkFlags & (uint)LinkFlags.DisableKnownFolderAlias) != 0;
+        options.AllowLinkToLink = (linkFlags & (uint)LinkFlags.AllowLinkToLink) != 0;
+        options.UnaliasOnSave = (linkFlags & (uint)LinkFlags.UnaliasOnSave) != 0;
+        options.KeepLocalIDListForUNCTarget = (linkFlags & (uint)LinkFlags.KeepLocalIDListForUNCTarget) != 0;
 
         return linkFlags;
     }
@@ -253,6 +273,19 @@ internal static class LnkParser
             reader.BaseStream.Position = linkInfoStart + cnrlOffset + netNameOffset;
             string shareName = reader.ReadNullTerminatedAnsiString();
 
+            // Read DeviceName if ValidDevice flag is set
+            string? deviceName = null;
+            if ((cnrlFlags & 0x01) != 0 && deviceNameOffset > 0)
+            {
+                reader.BaseStream.Position = linkInfoStart + cnrlOffset + deviceNameOffset;
+                deviceName = reader.ReadNullTerminatedAnsiString();
+            }
+
+            // Read NetworkProviderType if ValidNetType flag is set
+            uint? providerType = null;
+            if ((cnrlFlags & 0x02) != 0)
+                providerType = networkProviderType;
+
             // Read CommonPathSuffix
             reader.BaseStream.Position = linkInfoStart + commonPathSuffixOffset;
             string commonPathSuffix = reader.ReadNullTerminatedAnsiString();
@@ -260,7 +293,9 @@ internal static class LnkParser
             linkInfo.Network = new NetworkPathInfo
             {
                 ShareName = shareName,
-                CommonPathSuffix = commonPathSuffix
+                CommonPathSuffix = commonPathSuffix,
+                DeviceName = deviceName,
+                NetworkProviderType = providerType
             };
         }
 
@@ -336,6 +371,21 @@ internal static class LnkParser
                     break;
                 case LnkConstants.PropertyStoreBlockSignature:
                     ReadPropertyStoreDataBlock(reader, options, dataLength);
+                    break;
+                case LnkConstants.ConsoleBlockSignature:
+                    ReadConsoleDataBlock(reader, options);
+                    break;
+                case LnkConstants.ConsoleFEBlockSignature:
+                    ReadConsoleFEDataBlock(reader, options);
+                    break;
+                case LnkConstants.DarwinBlockSignature:
+                    ReadDarwinDataBlock(reader, options);
+                    break;
+                case LnkConstants.ShimBlockSignature:
+                    ReadShimDataBlock(reader, options, dataLength);
+                    break;
+                case LnkConstants.VistaIdListBlockSignature:
+                    ReadVistaIdListDataBlock(reader, options, dataLength);
                     break;
                 default:
                     // Skip unknown blocks
@@ -430,6 +480,73 @@ internal static class LnkParser
     private static void ReadPropertyStoreDataBlock(BinaryReader reader, ShortcutOptions options, int dataLength)
     {
         options.PropertyStoreData = reader.ReadBytes(dataLength);
+    }
+
+    private static void ReadConsoleDataBlock(BinaryReader reader, ShortcutOptions options)
+    {
+        var data = new ConsoleData();
+        data.FillAttributes = reader.ReadUInt16();
+        data.PopupFillAttributes = reader.ReadUInt16();
+        data.ScreenBufferSizeX = reader.ReadInt16();
+        data.ScreenBufferSizeY = reader.ReadInt16();
+        data.WindowSizeX = reader.ReadInt16();
+        data.WindowSizeY = reader.ReadInt16();
+        data.WindowOriginX = reader.ReadInt16();
+        data.WindowOriginY = reader.ReadInt16();
+        reader.ReadInt32(); // Unused1
+        reader.ReadInt32(); // Unused2
+        data.FontSize = reader.ReadUInt32();
+        data.FontFamily = reader.ReadUInt32();
+        data.FontWeight = reader.ReadUInt32();
+        data.FaceName = reader.ReadFixedUnicodeString(64);
+        data.CursorSize = reader.ReadUInt32();
+        data.FullScreen = reader.ReadUInt32() != 0;
+        data.QuickEdit = reader.ReadUInt32() != 0;
+        data.InsertMode = reader.ReadUInt32() != 0;
+        data.AutoPosition = reader.ReadUInt32() != 0;
+        data.HistoryBufferSize = reader.ReadUInt32();
+        data.NumberOfHistoryBuffers = reader.ReadUInt32();
+        data.HistoryNoDup = reader.ReadUInt32() != 0;
+        data.ColorTable = new uint[16];
+        for (int i = 0; i < 16; i++)
+            data.ColorTable[i] = reader.ReadUInt32();
+        options.Console = data;
+    }
+
+    private static void ReadConsoleFEDataBlock(BinaryReader reader, ShortcutOptions options)
+    {
+        options.ConsoleCodePage = reader.ReadUInt32();
+    }
+
+    private static void ReadDarwinDataBlock(BinaryReader reader, ShortcutOptions options)
+    {
+        // Same layout as EnvironmentVariableDataBlock: 260 ANSI + 520 Unicode
+        byte[] ansiBuffer = reader.ReadBytes(LnkConstants.MaxPath);
+        byte[] unicodeBuffer = reader.ReadBytes(LnkConstants.MaxPath * 2);
+
+        string unicodePath = Encoding.Unicode.GetString(unicodeBuffer).TrimEnd('\0');
+        if (!string.IsNullOrEmpty(unicodePath))
+        {
+            options.DarwinData = unicodePath;
+            return;
+        }
+
+        string ansiPath = Encoding.Default.GetString(ansiBuffer).TrimEnd('\0');
+        if (!string.IsNullOrEmpty(ansiPath))
+            options.DarwinData = ansiPath;
+    }
+
+    private static void ReadShimDataBlock(BinaryReader reader, ShortcutOptions options, int dataLength)
+    {
+        if (dataLength <= 0) return;
+        byte[] bytes = reader.ReadBytes(dataLength);
+        options.ShimLayerName = Encoding.Unicode.GetString(bytes).TrimEnd('\0');
+    }
+
+    private static void ReadVistaIdListDataBlock(BinaryReader reader, ShortcutOptions options, int dataLength)
+    {
+        if (dataLength <= 0) return;
+        options.VistaIdListData = reader.ReadBytes(dataLength);
     }
 
     private static DateTime? FileTimeToDateTime(long fileTime)

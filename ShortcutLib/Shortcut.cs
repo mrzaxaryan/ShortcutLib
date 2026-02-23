@@ -35,6 +35,10 @@ public static class Shortcut
         WriteExtraDataBlocks(writer, options);
 
         writer.Write(0u); // Terminate extra data chain
+
+        if (options.OverlayData is { Length: > 0 })
+            writer.Write(options.OverlayData);
+
         writer.Flush();
         return ms.ToArray();
     }
@@ -54,6 +58,20 @@ public static class Shortcut
             | (options.IconLocation != null ? LinkFlags.HasIconLocation : 0)
             | (options.UseUnicode ? LinkFlags.IsUnicode : 0)
             | (options.RunAsAdmin ? LinkFlags.RunAsUser : 0)
+            | (options.IconEnvironmentPath != null ? LinkFlags.HasExpIcon : 0)
+            | (options.ForceNoLinkInfo ? LinkFlags.ForceNoLinkInfo : 0)
+            | (options.RunInSeparateProcess ? LinkFlags.RunInSeparateProcess : 0)
+            | (options.NoPidlAlias ? LinkFlags.NoPidlAlias : 0)
+            | (options.ForceNoLinkTrack ? LinkFlags.ForceNoLinkTrack : 0)
+            | (options.EnableTargetMetadata ? LinkFlags.EnableTargetMetadata : 0)
+            | (options.DisableLinkPathTracking ? LinkFlags.DisableLinkPathTracking : 0)
+            | (options.DisableKnownFolderTracking ? LinkFlags.DisableKnownFolderTracking : 0)
+            | (options.DisableKnownFolderAlias ? LinkFlags.DisableKnownFolderAlias : 0)
+            | (options.AllowLinkToLink ? LinkFlags.AllowLinkToLink : 0)
+            | (options.UnaliasOnSave ? LinkFlags.UnaliasOnSave : 0)
+            | (options.KeepLocalIDListForUNCTarget ? LinkFlags.KeepLocalIDListForUNCTarget : 0)
+            | (options.DarwinData != null ? LinkFlags.HasDarwinID : 0)
+            | (options.ShimLayerName != null ? LinkFlags.RunWithShimLayer : 0)
             | flagEnv;
     }
 
@@ -68,7 +86,12 @@ public static class Shortcut
             {
                 return new LinkInfo
                 {
-                    Network = new NetworkPathInfo { ShareName = target }
+                    Network = new NetworkPathInfo
+                    {
+                        ShareName = target,
+                        DeviceName = existing?.Network?.DeviceName,
+                        NetworkProviderType = existing?.Network?.NetworkProviderType
+                    }
                 };
             }
 
@@ -80,8 +103,10 @@ public static class Shortcut
             {
                 Network = new NetworkPathInfo
                 {
-                    ShareName = shareName,
-                    CommonPathSuffix = suffix
+                    ShareName = existing?.Network?.ShareName ?? shareName,
+                    CommonPathSuffix = existing?.Network?.CommonPathSuffix ?? suffix,
+                    DeviceName = existing?.Network?.DeviceName,
+                    NetworkProviderType = existing?.Network?.NetworkProviderType
                 }
             };
         }
@@ -103,7 +128,10 @@ public static class Shortcut
         writer.Write(new byte[] { 0x4C, 0x00, 0x00, 0x00 }); // HeaderSize
         writer.Write(LnkConstants.LinkClsid.ToByteArray());
         writer.Write((uint)linkFlags);
-        writer.Write(pathInfo.FileAttributes);
+        if (options.FileAttributes.HasValue)
+            writer.Write((uint)options.FileAttributes.Value);
+        else
+            writer.Write(pathInfo.FileAttributes);
         writer.Write(ToFileTimeBytes(options.CreationTime));
         writer.Write(ToFileTimeBytes(options.AccessTime));
         writer.Write(ToFileTimeBytes(options.WriteTime));
@@ -171,5 +199,20 @@ public static class Shortcut
 
         if (options.PropertyStoreData != null)
             ExtraDataBlockWriter.WritePropertyStoreDataBlock(writer, options.PropertyStoreData);
+
+        if (options.Console != null)
+            ExtraDataBlockWriter.WriteConsoleDataBlock(writer, options.Console);
+
+        if (options.ConsoleCodePage.HasValue)
+            ExtraDataBlockWriter.WriteConsoleFEDataBlock(writer, options.ConsoleCodePage.Value);
+
+        if (options.DarwinData != null)
+            writer.WriteEnvironmentDataBlock(options.DarwinData, LnkConstants.DarwinBlockSignature);
+
+        if (options.ShimLayerName != null)
+            ExtraDataBlockWriter.WriteShimDataBlock(writer, options.ShimLayerName);
+
+        if (options.VistaIdListData != null)
+            ExtraDataBlockWriter.WriteVistaIdListDataBlock(writer, options.VistaIdListData);
     }
 }

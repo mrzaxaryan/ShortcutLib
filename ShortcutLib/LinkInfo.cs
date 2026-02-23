@@ -43,4 +43,10 @@ public sealed class NetworkPathInfo
 
     /// <summary>Common path suffix appended after the share name.</summary>
     public string CommonPathSuffix { get; set; } = "";
+
+    /// <summary>Mapped device name (e.g., "Z:"). Null if not present.</summary>
+    public string? DeviceName { get; set; }
+
+    /// <summary>Network provider type. Null uses default (LANMAN). See <see cref="NetworkProviderTypes"/>.</summary>
+    public uint? NetworkProviderType { get; set; }
 }

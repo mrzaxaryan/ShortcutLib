@@ -47,16 +47,30 @@ internal static class ExtraDataBlockWriter
         {
             var network = info.Network!;
             byte[] shareNameAnsi = Encoding.Default.GetBytes(network.ShareName + "\0");
-            // CommonNetworkRelativeLink: size(4) + flags(4) + netNameOffset(4) + deviceNameOffset(4) + networkProviderType(4) + netName
-            int cnrlSize = 4 + 4 + 4 + 4 + 4 + shareNameAnsi.Length;
+            byte[] deviceNameAnsi = network.DeviceName != null
+                ? Encoding.Default.GetBytes(network.DeviceName + "\0")
+                : [];
+
+            int cnrlFlags = 0;
+            if (network.DeviceName != null) cnrlFlags |= 0x01;    // ValidDevice
+            if (network.NetworkProviderType.HasValue) cnrlFlags |= 0x02; // ValidNetType
+
+            const int cnrlHeaderSize = 0x14; // 5 * 4 = 20 bytes
+            int deviceNameOffset = network.DeviceName != null
+                ? cnrlHeaderSize + shareNameAnsi.Length
+                : 0;
+            int cnrlSize = cnrlHeaderSize + shareNameAnsi.Length + deviceNameAnsi.Length;
+
             using var cnrlMs = new MemoryStream();
             using var cnrlW = new BinaryWriter(cnrlMs);
             cnrlW.Write(cnrlSize);
-            cnrlW.Write(0); // CommonNetworkRelativeLinkFlags = 0
-            cnrlW.Write(0x14); // NetNameOffset = 20 (offset within CNRL)
-            cnrlW.Write(0); // DeviceNameOffset = 0
-            cnrlW.Write(0x00020000); // NetworkProviderType = WNNC_NET_LANMAN
+            cnrlW.Write(cnrlFlags);
+            cnrlW.Write(cnrlHeaderSize); // NetNameOffset = 20
+            cnrlW.Write(deviceNameOffset);
+            cnrlW.Write(network.NetworkProviderType ?? 0x00020000u); // Default WNNC_NET_LANMAN
             cnrlW.Write(shareNameAnsi);
+            if (deviceNameAnsi.Length > 0)
+                cnrlW.Write(deviceNameAnsi);
             cnrlW.Flush();
             cnrlBytes = cnrlMs.ToArray();
 
@@ -174,5 +188,81 @@ internal static class ExtraDataBlockWriter
         writer.Write(LnkConstants.SpecialFolderBlockSignature);
         writer.Write(data.FolderId);
         writer.Write(data.Offset);
+    }
+
+    /// <summary>
+    /// Writes a ConsoleDataBlock (signature 0xA0000002, size 204 bytes).
+    /// </summary>
+    internal static void WriteConsoleDataBlock(BinaryWriter writer, ConsoleData data)
+    {
+        writer.Write(204); // BlockSize: always 0xCC
+        writer.Write(LnkConstants.ConsoleBlockSignature);
+
+        writer.Write(data.FillAttributes);
+        writer.Write(data.PopupFillAttributes);
+        writer.Write(data.ScreenBufferSizeX);
+        writer.Write(data.ScreenBufferSizeY);
+        writer.Write(data.WindowSizeX);
+        writer.Write(data.WindowSizeY);
+        writer.Write(data.WindowOriginX);
+        writer.Write(data.WindowOriginY);
+        writer.Write(0); // Unused1
+        writer.Write(0); // Unused2
+        writer.Write(data.FontSize);
+        writer.Write(data.FontFamily);
+        writer.Write(data.FontWeight);
+
+        // FaceName: 32 WCHARs = 64 bytes, null-padded
+        byte[] faceNameBytes = new byte[64];
+        byte[] encoded = Encoding.Unicode.GetBytes(data.FaceName);
+        int copyLen = Math.Min(encoded.Length, 62); // leave room for null terminator
+        Array.Copy(encoded, faceNameBytes, copyLen);
+        writer.Write(faceNameBytes);
+
+        writer.Write(data.CursorSize);
+        writer.Write(data.FullScreen ? 1u : 0u);
+        writer.Write(data.QuickEdit ? 1u : 0u);
+        writer.Write(data.InsertMode ? 1u : 0u);
+        writer.Write(data.AutoPosition ? 1u : 0u);
+        writer.Write(data.HistoryBufferSize);
+        writer.Write(data.NumberOfHistoryBuffers);
+        writer.Write(data.HistoryNoDup ? 1u : 0u);
+
+        // ColorTable: 16 x uint32
+        for (int i = 0; i < 16; i++)
+            writer.Write(i < data.ColorTable.Length ? data.ColorTable[i] : 0u);
+    }
+
+    /// <summary>
+    /// Writes a ConsoleFEDataBlock (signature 0xA0000004, size 12 bytes).
+    /// </summary>
+    internal static void WriteConsoleFEDataBlock(BinaryWriter writer, uint codePage)
+    {
+        writer.Write(12); // BlockSize
+        writer.Write(LnkConstants.ConsoleFEBlockSignature);
+        writer.Write(codePage);
+    }
+
+    /// <summary>
+    /// Writes a ShimDataBlock (signature 0xA0000008, variable size).
+    /// </summary>
+    internal static void WriteShimDataBlock(BinaryWriter writer, string layerName)
+    {
+        byte[] unicodeBytes = Encoding.Unicode.GetBytes(layerName + "\0");
+        int blockSize = 8 + unicodeBytes.Length;
+        writer.Write(blockSize);
+        writer.Write(LnkConstants.ShimBlockSignature);
+        writer.Write(unicodeBytes);
+    }
+
+    /// <summary>
+    /// Writes a VistaAndAboveIDListDataBlock (signature 0xA000000C, variable size).
+    /// </summary>
+    internal static void WriteVistaIdListDataBlock(BinaryWriter writer, byte[] idListData)
+    {
+        int blockSize = 8 + idListData.Length;
+        writer.Write(blockSize);
+        writer.Write(LnkConstants.VistaIdListBlockSignature);
+        writer.Write(idListData);
     }
 }

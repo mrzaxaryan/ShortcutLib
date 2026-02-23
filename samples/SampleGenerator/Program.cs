@@ -236,4 +236,74 @@ Save("20_AllFeatures.lnk", Shortcut.Create(new ShortcutOptions
     }
 }));
 
-Console.WriteLine($"\nDone! 20 .lnk files generated.");
+// 21. Console shortcut
+Save("21_Console.lnk", Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\Windows\System32\cmd.exe",
+    Console = new ConsoleData
+    {
+        ScreenBufferSizeX = 120,
+        ScreenBufferSizeY = 9001,
+        WindowSizeX = 120,
+        WindowSizeY = 30,
+        FaceName = "Consolas",
+        FontSize = 0x000E0000, // 14pt
+        QuickEdit = true,
+        InsertMode = true,
+    }
+}));
+
+// 22. Console with Far East code page
+Save("22_Console_FE.lnk", Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\Windows\System32\cmd.exe",
+    Console = new ConsoleData { ScreenBufferSizeX = 80, WindowSizeX = 80 },
+    ConsoleCodePage = 65001 // UTF-8
+}));
+
+// 23. Darwin data block (MSI advertised shortcut)
+Save("23_Darwin.lnk", Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\Windows\notepad.exe",
+    DarwinData = "[ProductCode]>Feature>Component"
+}));
+
+// 24. Shim layer (compatibility mode)
+Save("24_ShimLayer.lnk", Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\OldApp\setup.exe",
+    ShimLayerName = "WINXP"
+}));
+
+// 25. FileAttributes override (hidden + system)
+Save("25_HiddenSystem.lnk", Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\Windows\notepad.exe",
+    FileAttributes = ShortcutLib.FileAttributes.Hidden | ShortcutLib.FileAttributes.System | ShortcutLib.FileAttributes.Archive
+}));
+
+// 26. PropertyStoreBuilder (AppUserModelId)
+var psb = new PropertyStoreBuilder { AppUserModelId = "ShortcutLib.Sample", PreventPinning = true };
+Save("26_PropertyStore.lnk", Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\Windows\notepad.exe",
+    PropertyStoreData = psb.Build()
+}));
+
+// 27. Network with DeviceName and provider type
+Save("27_Network_Enhanced.lnk", Shortcut.Create(new ShortcutOptions
+{
+    Target = @"\\server\share\file.txt",
+    LinkInfo = new LinkInfo
+    {
+        Network = new NetworkPathInfo
+        {
+            ShareName = @"\\server\share",
+            CommonPathSuffix = "file.txt",
+            DeviceName = "Z:",
+            NetworkProviderType = NetworkProviderTypes.Lanman
+        }
+    }
+}));
+
+Console.WriteLine($"\nDone! 27 .lnk files generated.");

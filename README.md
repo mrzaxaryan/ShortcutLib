@@ -18,7 +18,12 @@ A zero-dependency .NET library for creating, opening, and editing Windows Shell 
 - Target file size metadata
 - Relative path support
 - LinkInfo structure (local volume info and network share info)
-- Extra data blocks: IconEnvironment, KnownFolder, Tracker, PropertyStore, SpecialFolder
+- Extra data blocks: Console, ConsoleFE, Darwin (MSI), Shim, IconEnvironment, KnownFolder, Tracker, PropertyStore, SpecialFolder, VistaAndAboveIDList
+- All 27 LinkFlags from the MS-SHLLINK spec (AllowLinkToLink, ForceNoLinkTrack, etc.)
+- FileAttributes enum (ReadOnly, Hidden, System, Encrypted, etc.)
+- Network path enhancements (DeviceName, NetworkProviderType)
+- PropertyStoreBuilder for typed AppUserModelID, ToastActivatorCLSID, PreventPinning
+- Overlay data (post-terminal block data) preservation
 - Returns raw `byte[]` — no COM interop or Windows Shell dependency
 - Targets .NET 10
 
@@ -125,6 +130,78 @@ byte[] lnk = Shortcut.Create(new ShortcutOptions
     {
         FolderId = 0x0024   // CSIDL_WINDOWS
     }
+});
+
+// Console shortcut with display settings
+byte[] lnk = Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\Windows\System32\cmd.exe",
+    Console = new ConsoleData
+    {
+        ScreenBufferSizeX = 120,
+        ScreenBufferSizeY = 9001,
+        WindowSizeX = 120,
+        WindowSizeY = 30,
+        FaceName = "Consolas",
+        QuickEdit = true
+    },
+    ConsoleCodePage = 65001   // UTF-8
+});
+
+// MSI advertised shortcut (Darwin data block)
+byte[] lnk = Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\Windows\notepad.exe",
+    DarwinData = "[ProductCode]>Feature>Component"
+});
+
+// App compatibility shim
+byte[] lnk = Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\OldApp\setup.exe",
+    ShimLayerName = "WINXP"
+});
+
+// Explicit file attributes
+byte[] lnk = Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\Windows\notepad.exe",
+    FileAttributes = FileAttributes.Hidden | FileAttributes.System | FileAttributes.Archive
+});
+
+// Network share with mapped drive and provider
+byte[] lnk = Shortcut.Create(new ShortcutOptions
+{
+    Target = @"\\server\share\file.txt",
+    LinkInfo = new LinkInfo
+    {
+        Network = new NetworkPathInfo
+        {
+            ShareName = @"\\server\share",
+            CommonPathSuffix = "file.txt",
+            DeviceName = "Z:",
+            NetworkProviderType = NetworkProviderTypes.Lanman
+        }
+    }
+});
+
+// Typed property store (AppUserModelId for taskbar grouping)
+var builder = new PropertyStoreBuilder
+{
+    AppUserModelId = "MyCompany.MyApp",
+    PreventPinning = true
+};
+byte[] lnk = Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\MyApp\app.exe",
+    PropertyStoreData = builder.Build()
+});
+
+// Allow shortcut to link to another .lnk file
+byte[] lnk = Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\Users\Desktop\other.lnk",
+    AllowLinkToLink = true
 });
 
 // All features combined
@@ -263,6 +340,24 @@ public static byte[] Shortcut.Create(ShortcutOptions options)
 | `Tracker` | `TrackerData?` | `null` | Distributed link tracker data |
 | `PropertyStoreData` | `byte[]?` | `null` | Raw serialized property store bytes |
 | `SpecialFolder` | `SpecialFolderData?` | `null` | Special folder data block |
+| `Console` | `ConsoleData?` | `null` | Console display settings |
+| `ConsoleCodePage` | `uint?` | `null` | Far East console code page |
+| `DarwinData` | `string?` | `null` | MSI advertised shortcut descriptor |
+| `ShimLayerName` | `string?` | `null` | App compatibility layer (e.g. `"WINXP"`) |
+| `VistaIdListData` | `byte[]?` | `null` | Vista+ alternative IDList |
+| `OverlayData` | `byte[]?` | `null` | Data after terminal block |
+| `FileAttributes` | `FileAttributes?` | `null` | Explicit file attributes (auto-detected when null) |
+| `ForceNoLinkInfo` | `bool` | `false` | Ignore LinkInfo during resolution |
+| `RunInSeparateProcess` | `bool` | `false` | 16-bit target in separate VDM |
+| `NoPidlAlias` | `bool` | `false` | No shell namespace alias |
+| `ForceNoLinkTrack` | `bool` | `false` | Ignore TrackerDataBlock |
+| `EnableTargetMetadata` | `bool` | `false` | Populate PropertyStore on target set |
+| `DisableLinkPathTracking` | `bool` | `false` | Ignore EnvironmentVariableDataBlock |
+| `DisableKnownFolderTracking` | `bool` | `false` | Ignore KnownFolder/SpecialFolder |
+| `DisableKnownFolderAlias` | `bool` | `false` | Use unaliased known folder IDList |
+| `AllowLinkToLink` | `bool` | `false` | Allow shortcut to another .lnk |
+| `UnaliasOnSave` | `bool` | `false` | Unalias target IDList on save |
+| `KeepLocalIDListForUNCTarget` | `bool` | `false` | Store local IDList for UNC targets |
 
 ### ShortcutWindowStyle
 
@@ -304,6 +399,8 @@ Describes the target's location per [MS-SHLLINK] 2.3. Provide `Local`, `Network`
 |---|---|---|---|
 | `ShareName` | `string` | *(required)* | UNC share name |
 | `CommonPathSuffix` | `string` | `""` | Path suffix after share |
+| `DeviceName` | `string?` | `null` | Mapped drive letter (e.g. `"Z:"`) |
+| `NetworkProviderType` | `uint?` | `null` | Network provider (see `NetworkProviderTypes`) |
 
 ### KnownFolderData
 
@@ -336,6 +433,75 @@ Distributed link tracking service data per [MS-SHLLINK] 2.5.10.
 |---|---|---|
 | `FolderId` | `uint` | CSIDL value identifying the special folder |
 | `Offset` | `uint` | Offset into the IDList |
+
+### FileAttributes
+
+`[Flags]` enum for explicit target file attributes:
+
+`ReadOnly`, `Hidden`, `System`, `Directory`, `Archive`, `Normal`, `Temporary`, `SparseFile`, `ReparsePoint`, `Compressed`, `Offline`, `NotContentIndexed`, `Encrypted`
+
+When `ShortcutOptions.FileAttributes` is null, attributes are auto-detected from the target path.
+
+### ConsoleData
+
+Console display settings for ConsoleDataBlock (signature `0xA0000002`, 204 bytes).
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `FillAttributes` | `ushort` | `0` | Text foreground/background color |
+| `PopupFillAttributes` | `ushort` | `0` | Popup color |
+| `ScreenBufferSizeX` | `short` | `80` | Buffer width (columns) |
+| `ScreenBufferSizeY` | `short` | `300` | Buffer height (rows) |
+| `WindowSizeX` | `short` | `80` | Window width (columns) |
+| `WindowSizeY` | `short` | `25` | Window height (rows) |
+| `WindowOriginX/Y` | `short` | `0` | Window position |
+| `FontSize` | `uint` | `0` | Font height (high) + width (low) |
+| `FontFamily` | `uint` | `0` | Font family + pitch flags |
+| `FontWeight` | `uint` | `0` | 400=normal, 700=bold |
+| `FaceName` | `string` | `"Consolas"` | Font name (max 31 chars) |
+| `CursorSize` | `uint` | `25` | Cursor size % (1-100) |
+| `FullScreen` | `bool` | `false` | Full screen mode |
+| `QuickEdit` | `bool` | `false` | Mouse selection |
+| `InsertMode` | `bool` | `false` | Insert mode |
+| `AutoPosition` | `bool` | `true` | Auto-position window |
+| `HistoryBufferSize` | `uint` | `50` | History buffer size |
+| `NumberOfHistoryBuffers` | `uint` | `4` | History buffer count |
+| `HistoryNoDup` | `bool` | `false` | Remove history duplicates |
+| `ColorTable` | `uint[16]` | *(classic palette)* | 16 RGB colors (0x00BBGGRR) |
+
+### NetworkProviderTypes
+
+Well-known `WNNC_NET_*` constants: `Lanman` (0x00020000), `Netware`, `SunPcNfs`, `Vines`, `Dfs`, `TerminalServices`, `OpenAfs`, `MsNfs`, `Google`, `VMware`
+
+### PropertyStoreBuilder
+
+Builds typed MS-PROPSTORE data for `ShortcutOptions.PropertyStoreData`:
+
+```csharp
+var builder = new PropertyStoreBuilder
+{
+    AppUserModelId = "MyCompany.MyApp",
+    PreventPinning = true,
+    ToastActivatorCLSID = Guid.Parse("..."),
+    RelaunchCommand = "myapp.exe --relaunch"
+};
+byte[] lnk = Shortcut.Create(new ShortcutOptions
+{
+    Target = @"C:\MyApp\app.exe",
+    PropertyStoreData = builder.Build()
+});
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `AppUserModelId` | `string?` | Taskbar grouping / jump list ID |
+| `ToastActivatorCLSID` | `Guid?` | Toast notification COM CLSID |
+| `PreventPinning` | `bool?` | Prevent taskbar/Start pinning |
+| `RelaunchCommand` | `string?` | Taskbar relaunch command |
+| `RelaunchDisplayNameResource` | `string?` | Relaunch display name |
+| `RelaunchIconResource` | `string?` | Relaunch icon |
+| `ExcludeFromShowInNewInstall` | `bool?` | Hide from "New programs" list |
+| `IsDestListSeparator` | `bool?` | Jump list separator |
 
 ### Argument Padding
 
