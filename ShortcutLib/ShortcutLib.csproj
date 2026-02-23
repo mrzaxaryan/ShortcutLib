@@ -9,15 +9,19 @@
     <Description>A zero-dependency library for creating Windows Shell Link (.lnk) shortcut files in memory.</Description>
     <Authors>mrzaxaryan</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/mrzaxaryan/LNK</RepositoryUrl>
+    <RepositoryUrl>https://github.com/mrzaxaryan/ShortcutLib</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageProjectUrl>https://github.com/mrzaxaryan/LNK</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/mrzaxaryan/ShortcutLib</PackageProjectUrl>
     <PackageTags>lnk;shortcut;shell-link;windows</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="ShortcutLib.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>
