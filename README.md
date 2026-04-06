@@ -1,5 +1,13 @@
 # ShortcutLib
 
+[![Build & Test](https://github.com/mrzaxaryan/ShortcutLib/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/mrzaxaryan/ShortcutLib/actions/workflows/build-and-test.yml)
+[![NuGet](https://img.shields.io/nuget/v/ShortcutLib?style=flat-square&logo=nuget&color=004880)](https://www.nuget.org/packages/ShortcutLib)
+![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)
+![C#](https://img.shields.io/badge/C%23-239120?style=for-the-badge&logo=csharp&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-brightgreen?style=for-the-badge)
+![MS-SHLLINK](https://img.shields.io/badge/MS--SHLLINK-Spec%20Compliant-blue?style=for-the-badge)
+
 A zero-dependency .NET library for creating, opening, and editing Windows Shell Link (.lnk) shortcut files in memory.
 
 ## Features
@@ -873,6 +881,10 @@ dotnet build
 ```
 dotnet test
 ```
+
+## Responsible Use
+
+See [RESPONSIBLE_USE.md](RESPONSIBLE_USE.md) for usage guidelines related to security research and forensic analysis.
 
 ## License
 
